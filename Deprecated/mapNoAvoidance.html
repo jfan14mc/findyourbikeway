@@ -1,0 +1,112 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bike Route Map</title>
+    <link href="style.css" rel="stylesheet" type="text/css">
+    <style>
+        #map { height: 400px; width: 100%; }
+        #controls { margin-top: 20px; }
+        input, button { margin: 5px; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Bike Route Enhancer</h1>
+        <p>Improving bike routes through community feedback</p>
+    </header>
+
+    <nav class="navigation">
+        <ul>
+           <li><a href="index.html"> Home </a></li>
+           <li><a href="about.html"> About </a> </li>
+           <li><a href="report.html"> Contribute </a> </li>
+           <li><a href="map.html"> Map </a> </li>
+       </ul>
+    </nav>    
+    <div id="map"></div>
+    <div id="controls">
+        <input type="text" id="fromAddress" placeholder="From Address">
+        <input type="text" id="toAddress" placeholder="To Address">
+        <input type="text" id="preferredRoads" placeholder="Preferred Roads (comma-separated)">
+        <input type="text" id="avoidanceAreas" placeholder="Avoidance Areas (comma-separated)">
+        <button onclick="calculateRoute()">Calculate Route</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.js"></script>
+    <script>
+        let map, routeLayer;
+        const apiKey = '5b3ce3597851110001cf62483ee3405e20b844b4b5e0390a3f701f55'; // Replace with your API key
+
+        function initMap() {
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            if ('geolocation' in navigator) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const { latitude, longitude } = position.coords;
+                    map.setView([latitude, longitude], 13);
+                });
+            }
+        }
+
+        async function calculateRoute() {
+            const fromAddress = document.getElementById('fromAddress').value;
+            const toAddress = document.getElementById('toAddress').value;
+            const preferredRoads = document.getElementById('preferredRoads').value.split(',').map(s => s.trim());
+            const avoidanceAreas = document.getElementById('avoidanceAreas').value.split(',').map(s => s.trim());
+
+            const fromCoords = await geocode(fromAddress);
+            const toCoords = await geocode(toAddress);
+
+            if (!fromCoords || !toCoords) {
+                alert('Unable to geocode one or both addresses');
+                return;
+            }
+
+            const url = `https://api.openrouteservice.org/v2/directions/cycling-regular?api_key=${apiKey}&start=${fromCoords.lon},${fromCoords.lat}&end=${toCoords.lon},${toCoords.lat}`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                displayRoute(data);
+            } catch (error) {
+                console.error('Error calculating route:', error);
+                alert('Error calculating route');
+            }
+        }
+
+        async function geocode(address) {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.length > 0) {
+                    return { lat: data[0].lat, lon: data[0].lon };
+                }
+            } catch (error) {
+                console.error('Error geocoding:', error);
+            }
+            return null;
+        }
+
+        function displayRoute(routeData) {
+            if (routeLayer) {
+                map.removeLayer(routeLayer);
+            }
+
+            const coordinates = routeData.features[0].geometry.coordinates;
+            const latLngs = coordinates.map(coord => [coord[1], coord[0]]);
+
+            routeLayer = L.polyline(latLngs, { color: 'blue' }).addTo(map);
+            map.fitBounds(routeLayer.getBounds());
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
