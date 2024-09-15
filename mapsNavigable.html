@@ -357,26 +357,25 @@
         }
 
         function updateStepDisplay() {
-                if (!currentRoute) return;
-                const steps = currentRoute.features[0].properties.segments[0].steps;
-                const directionsContainer = document.getElementById('directionsContainer');
-                directionsContainer.innerHTML = '';
+            if (!currentRoute) return;
+            const steps = currentRoute.features[0].properties.segments[0].steps;
+            const directionsContainer = document.getElementById('directionsContainer');
+            directionsContainer.innerHTML = '';
 
-                if (isNavigationMode) {
-                    // Show only the next 3 steps without numbers
-                    const div = document.createElement('div');
-                    for (let i = currentStepIndex; i < Math.min(currentStepIndex + 3, steps.length); i++) {
-                        const p = document.createElement('p');
-                        p.textContent = `${steps[i].instruction} (${steps[i].distance.toFixed(0)} meters)`;
-                        p.id = `direction-step-${i}`;
-                        p.className = 'navigation-step';
-                        if (i === currentStepIndex) {
-                            p.classList.add('current-step');
-                        }
-                        div.appendChild(p);
+            if (isNavigationMode) {
+                const div = document.createElement('div');
+                for (let i = currentStepIndex; i < Math.min(currentStepIndex + 3, steps.length); i++) {
+                    const p = document.createElement('p');
+                    p.textContent = `${steps[i].instruction} (${steps[i].distance.toFixed(0)} meters)`;
+                    p.id = `direction-step-${i}`;
+                    p.className = 'navigation-step';
+                    if (i === currentStepIndex) {
+                        p.classList.add('current-step');
                     }
-                    directionsContainer.appendChild(div);
-                } else {
+                    div.appendChild(p);
+                }
+                directionsContainer.appendChild(div);
+            } else {
                     // Show all steps with numbers
                     const ol = document.createElement('ol');
                     steps.forEach((step, index) => {
@@ -391,20 +390,24 @@
 
         // Updates the current direction step based on user's location
         function updateCurrentDirectionStep(lat, lng) {
-            if (!currentRoute || !stepsConfirmed) return;
-
+            if (!currentRoute || !isNavigationMode) return;
+            
             const steps = currentRoute.features[0].properties.segments[0].steps;
             const routeCoordinates = currentRoute.features[0].geometry.coordinates;
-
-            let closestPointIndex = findClosestPointOnRoute(lat, lng, routeCoordinates);
-            const closestPoint = routeCoordinates[closestPointIndex];
-            const distanceToRoute = calculateDistance(lat, lng, closestPoint[1], closestPoint[0]);
             
-            if (distanceToRoute <= 0.05) { // 0.05 km = 50 meters
-                updateStepDisplay(closestPointIndex, steps);
-            } else {
-                console.log("User is not on the route");
+            // Find the closest point on the route
+            let closestPointIndex = findClosestPointOnRoute(lat, lng, routeCoordinates);
+            
+            // Update the current step index
+            for (let i = 0; i < steps.length; i++) {
+                if (closestPointIndex >= steps[i].way_points[0] && closestPointIndex <= steps[i].way_points[1]) {
+                    currentStepIndex = i;
+                    break;
+                }
             }
+            
+            // Update the displayed steps
+            updateStepDisplay();
         }
 
         // Function to update step display based on user's position
