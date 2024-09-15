@@ -7,112 +7,105 @@
     <link href="style.css" rel="stylesheet" type="text/css">
     <style>
         #map { height: 400px; width: 100%; }
-        #controls { margin-top: 20px; }
+        #controls, #avoidanceAreas, #avoidanceList, #directions { margin-top: 20px; }
         input, button { margin: 5px; }
-        #directions { margin-top: 20px; }
-        #avoidanceAreas { margin-top: 10px; }
-        #avoidanceList { margin-top: 10px; }
+        .avoidance-area { cursor: pointer; }
     </style>
 </head>
 
 <body>
     <header>
-        <h1>Bike Route Enhancer</h1>
-        <p>Improving bike routes through community feedback</p>
+        <h1>Enhanced Bike Route Planner</h1>
+        <p>Plan your route with customizable avoidance areas</p>
     </header>
 
     <nav class="navigation">
         <ul>
-           <li><a href="index.html"> Home </a></li>
-           <li><a href="about.html"> About </a> </li>
-           <li><a href="report.html"> Contribute </a> </li>
-           <li><a href="leaflet.html"> Map </a> </li>
-       </ul>
+            <li><a href="index.html"> Home </a></li>
+            <li><a href="about.html"> About </a> </li>
+            <li><a href="report.html"> Contribute </a> </li>
+            <li><a href="leaflet.html"> Map </a> </li>
+        </ul>
     </nav>    
+
     <div id="map"></div>
-    <div id="directions"></div>
     <div id="controls">
         <input type="text" id="fromAddress" placeholder="From Address" value="32 vassar street, cambridge, ma">
         <input type="text" id="toAddress" placeholder="To Address" value="392 harvard st, cambridge, ma">
         <button onclick="calculateRoute()">Calculate Route</button>
     </div>
+
     <div id="avoidanceAreas">
         <h3>Avoidance Areas</h3>
-        <p>Click and drag on the map to create avoidance areas.</p>
-        <button onclick="clearAvoidanceAreas()">Clear Avoidance Areas</button>
+        <p>Shift+Click on the map to create circular avoidance areas. Click once for center, again for radius.</p>
+        <button onclick="clearAvoidanceAreas()">Clear All Avoidance Areas</button>
     </div>
+
     <div id="avoidanceList">
         <h3>List of Avoidance Areas</h3>
         <ul id="avoidanceListItems"></ul>
     </div>
 
+    <div id="directions"></div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.js"></script>
     <script>
         let map, routeLayer, avoidanceLayer;
-        const apiKey = '5b3ce3597851110001cf62483ee3405e20b844b4b5e0390a3f701f55'; // Replace with your API key
+        const apiKey = '5b3ce3597851110001cf62483ee3405e20b844b4b5e0390a3f701f55';
         let avoidanceAreas = [];
-
-        // Pre-defined list of avoidance areas :)
-        const predefinedAvoidanceAreas = [
-            [[42.3615, -71.0982], [42.3682, -71.1126]] // Central Square, Cambridge
-        ];
+        let isShiftPressed = false;
+        let tempCenter = null;
 
         function initMap() {
-            map = L.map('map').setView([0, 0], 2);
+            map = L.map('map').setView([42.3601, -71.0942], 13); // Centered on Cambridge, MA
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap contributors'
             }).addTo(map);
 
-            if ('geolocation' in navigator) {
-                navigator.geolocation.getCurrentPosition((position) => {
-                    const { latitude, longitude } = position.coords;
-                    map.setView([latitude, longitude], 13);
-                });
-            }
-
             avoidanceLayer = L.layerGroup().addTo(map);
-            initDrawing();
-            addPredefinedAvoidanceAreas();
-            updateAvoidanceList();
+            initAvoidanceAreaCreation();
         }
 
-        function initDrawing() {
-            let isDrawing = false;
-            let startLatLng, endLatLng;
-
-            map.on('mousedown', (e) => {
-                isDrawing = true;
-                startLatLng = e.latlng;
+        function initAvoidanceAreaCreation() {
+            // Event listener for shift key press/release
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Shift') isShiftPressed = true;
+            });
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'Shift') isShiftPressed = false;
             });
 
-            map.on('mousemove', (e) => {
-                if (isDrawing) {
-                    endLatLng = e.latlng;
-                    drawTempRectangle(startLatLng, endLatLng);
-                }
-            });
-
-            map.on('mouseup', () => {
-                if (isDrawing) {
-                    isDrawing = false;
-                    if (startLatLng && endLatLng) {
-                        addAvoidanceArea(startLatLng, endLatLng);
+            // Event listener for map clicks
+            map.on('click', (e) => {
+                if (isShiftPressed) {
+                    if (!tempCenter) {
+                        tempCenter = e.latlng;
+                    } else {
+                        const radius = tempCenter.distanceTo(e.latlng);
+                        addAvoidanceArea(tempCenter, radius);
+                        tempCenter = null;
                         updateAvoidanceList();
                     }
                 }
             });
         }
 
-        function drawTempRectangle(start, end) {
-            if (window.tempRectangle) {
-                map.removeLayer(window.tempRectangle);
-            }
-            window.tempRectangle = L.rectangle([start, end], {color: 'red', weight: 1}).addTo(map);
+        function addAvoidanceArea(center, radius) {
+            const circle = L.circle(center, {radius: radius, color: 'red', fillOpacity: 0.3}).addTo(avoidanceLayer);
+            const newArea = {center: center, radius: radius, circle: circle};
+            avoidanceAreas.push(newArea);
+
+            // Add click event for deletion
+            circle.on('click', () => {
+                if (!isShiftPressed) {
+                    deleteAvoidanceArea(newArea)}
+             });
         }
 
-        function addAvoidanceArea(start, end) {
-            const rectangle = L.rectangle([start, end], {color: 'red', fillOpacity: 0.3}).addTo(avoidanceLayer);
-            avoidanceAreas.push([[start.lat, start.lng], [end.lat, end.lng]]);
+        function deleteAvoidanceArea(area) {
+            avoidanceLayer.removeLayer(area.circle);
+            avoidanceAreas = avoidanceAreas.filter(a => a !== area);
+            updateAvoidanceList();
         }
 
         function clearAvoidanceAreas() {
@@ -121,18 +114,16 @@
             updateAvoidanceList();
         }
 
-        function addPredefinedAvoidanceAreas() {
-            predefinedAvoidanceAreas.forEach(area => {
-                addAvoidanceArea(L.latLng(area[0]), L.latLng(area[1]));
-            });
-        }
-
         function updateAvoidanceList() {
             const listElement = document.getElementById('avoidanceListItems');
             listElement.innerHTML = '';
             avoidanceAreas.forEach((area, index) => {
                 const li = document.createElement('li');
-                li.textContent = `Area ${index + 1}: [${area[0][0].toFixed(4)}, ${area[0][1].toFixed(4)}], [${area[1][0].toFixed(4)}, ${area[1][1].toFixed(4)}]`;
+                li.textContent = `Area ${index + 1}: Center [${area.center.lat.toFixed(4)}, ${area.center.lng.toFixed(4)}], Radius: ${area.radius.toFixed(2)}m`;
+                const deleteButton = document.createElement('button');
+                deleteButton.textContent = 'Delete';
+                deleteButton.onclick = () => deleteAvoidanceArea(area);
+                li.appendChild(deleteButton);
                 listElement.appendChild(li);
             });
         }
@@ -149,17 +140,19 @@
                 return;
             }
 
-            // Prepare avoidance areas for the API request
             const avoid_polygons = avoidanceAreas.map(area => {
+                const points = 32; // Number of points to approximate the circle
+                const coords = [];
+                for (let i = 0; i < points; i++) {
+                    const angle = (i / points) * 2 * Math.PI;
+                    const lat = area.center.lat + (area.radius / 111320) * Math.cos(angle);
+                    const lng = area.center.lng + (area.radius / (111320 * Math.cos(area.center.lat * Math.PI / 180))) * Math.sin(angle);
+                    coords.push([lng, lat]);
+                }
+                coords.push(coords[0]); // Close the polygon
                 return {
                     "type": "Polygon",
-                    "coordinates": [[
-                        [area[0][1], area[0][0]],
-                        [area[1][1], area[0][0]],
-                        [area[1][1], area[1][0]],
-                        [area[0][1], area[1][0]],
-                        [area[0][1], area[0][0]]
-                    ]]
+                    "coordinates": [coords]
                 };
             });
 
@@ -199,7 +192,7 @@
                 const response = await fetch(url);
                 const data = await response.json();
                 if (data.length > 0) {
-                    return { lat: data[0].lat, lon: data[0].lon };
+                    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
                 }
             } catch (error) {
                 console.error('Error geocoding:', error);
@@ -236,22 +229,3 @@
     </script>
 </body>
 </html>
-
-<!-- 
-Developer Instructions:
-
-To maintain this page with new avoidance areas:
-
-1. Locate the `predefinedAvoidanceAreas` array in the JavaScript code.
-2. Add new avoidance areas to this array using the following format:
-   [[latitude1, longitude1], [latitude2, longitude2]]
-   
-   Example:
-   [[40.7128, -74.0060], [40.7228, -74.0160]]
-
-3. Each pair of coordinates represents the top-left and bottom-right corners of a rectangular avoidance area.
-4. You can find coordinates for specific locations using online tools like Google Maps or OpenStreetMap.
-5. After adding new areas, test the page to ensure they appear correctly on the map.
-
-Remember to keep the array format consistent and use valid coordinate pairs for each avoidance area.
--->
