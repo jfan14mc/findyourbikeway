@@ -6,10 +6,16 @@
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <link href="style.css" rel="stylesheet" type="text/css">
     <title>Bike Route Enhancer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+        #map { height: 500px; }
+        .controls { margin-top: 20px; }
+        .controls button { margin-right: 10px; }
+    </style>
 </head>
 
 <body>
-
     <header>
         <h1>Get-A-Way</h1>
         <p>Improving bike routes through community feedback</p>
@@ -23,13 +29,98 @@
            <li><a href="mapsNavigable.html"> Map </a> </li>
        </ul>
     </nav>    
-    <main>
 
+    <main>
+        <div id="map"></div>
+        <div class="controls">
+            <button id="addAvoidArea">Add Avoidance Area</button>
+            <button id="removeAvoidArea">Remove Avoidance Area</button>
+            <button id="addRoutablePath">Add Routable Path</button>
+            <button id="removeRoutablePath">Remove Routable Path</button>
+            <button id="saveChanges">Save Changes</button>
+        </div>
     </main>
 
     <footer>
         <p>&copy; 2024 Bike Route Enhancer. Built with passion by cyclists, for cyclists.</p>
     </footer>
 
+    <script>
+        let map;
+        let avoidanceAreas = [];
+        let routablePaths = [];
+        let drawingMode = null;
+        let currentPath = null;
+
+        function initMap() {
+            map = L.map('map').setView([0, 0], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    map.setView([position.coords.latitude, position.coords.longitude], 13);
+                });
+            }
+        }
+
+        function addAvoidArea() {
+            drawingMode = 'avoidArea';
+            map.once('click', function(e) {
+                let area = L.circle(e.latlng, {radius: 100, color: 'red'}).addTo(map);
+                avoidanceAreas.push(area);
+                drawingMode = null;
+            });
+        }
+
+        function addRoutablePath() {
+            drawingMode = 'routablePath';
+            currentPath = L.polyline([], {color: 'green'}).addTo(map);
+            routablePaths.push(currentPath);
+            
+            map.on('click', onMapClick);
+        }
+
+        function onMapClick(e) {
+            if (drawingMode === 'routablePath') {
+                currentPath.addLatLng(e.latlng);
+                if (currentPath.getLatLngs().length === 2) {
+                    drawingMode = null;
+                    currentPath = null;
+                    map.off('click', onMapClick);
+                }
+            }
+        }
+
+        function removeAvoidArea() {
+            if (avoidanceAreas.length > 0) {
+                let area = avoidanceAreas.pop();
+                map.removeLayer(area);
+            }
+        }
+
+        function removeRoutablePath() {
+            if (routablePaths.length > 0) {
+                let path = routablePaths.pop();
+                map.removeLayer(path);
+            }
+        }
+
+        function saveChanges() {
+            // Placeholder for save functionality
+            console.log("Save changes clicked");
+            alert("Save functionality will be implemented later.");
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            document.getElementById('addAvoidArea').addEventListener('click', addAvoidArea);
+            document.getElementById('removeAvoidArea').addEventListener('click', removeAvoidArea);
+            document.getElementById('addRoutablePath').addEventListener('click', addRoutablePath);
+            document.getElementById('removeRoutablePath').addEventListener('click', removeRoutablePath);
+            document.getElementById('saveChanges').addEventListener('click', saveChanges);
+        });
+    </script>
 </body>
 </html>
