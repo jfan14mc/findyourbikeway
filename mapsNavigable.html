@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="X-UA-Compatible" content="ie=edge">
+        <link href="style.css" rel="stylesheet" type="text/css">
+        <style>
+            #map { height: 400px; width: 100%; }
+            #controls, #avoidanceAreas, #avoidanceList, #directions, #commonAvoidanceAreas { margin-top: 20px; }
+            input, button, textarea { margin: 5px; }
+            .avoidance-area { cursor: pointer; }
+            .current-step { font-weight: bold; color: #0000FF; }
+            #directionsContainer {
+                max-height: 200px;
+                overflow-y: auto;
+                border: 1px solid #ccc;
+                padding: 5px;
+                margin-top: 10px;
+                text-align: left;
+            }
+            #routeIndicator {
+                padding: 1px;
+                margin-top: 5px;
+                background-color: #f0f0f0;
+                border-radius: 5px;
+            }
+        </style>
+    </head>
+
+<body>
+    <header>
+        <h1>Enhanced Bike Route Planner</h1>
+        <p>Plan your route with customizable avoidance areas</p>
+    </header>
+
+    <nav class="navigation">
+        <ul>
+            <li><a href="index.html"> Home </a></li>
+            <li><a href="about.html"> About </a> </li>
+            <li><a href="report.html"> Contribute </a> </li>
+            <li><a href="mapsNavigable.html"> Map </a> </li>
+        </ul>
+    </nav>    
+
+
+    <div id="map"></div>
+    <div id="directionsContainer"></div>
+    <button id="toggleViewMode" onclick="toggleViewMode()">Confirm Steps</button>
+    <div id="routeIndicator"></div>
+    <div id="controls">
+        <input type="text" id="fromAddress" placeholder="From Address" value="273 Babcock St, Boston, MA 02215">
+        <input type="text" id="toAddress" placeholder="To Address" value="120 Vassar St, Cambridge, MA 02139">
+        <button onclick="calculateRoute()">Calculate Route</button>
+    </div>
+    <div id="avoidanceAreas">
+        <h3>Avoidance Areas</h3>
+        <p>Shift+Click on the map to create circular avoidance areas. Click once for center, again for radius.</p>
+        <button onclick="clearAvoidanceAreas()">Clear All Avoidance Areas</button>
+    </div>
+
+    <div id="avoidanceList">
+        <h3>List of Avoidance Areas</h3>
+        <ul id="avoidanceListItems"></ul>
+    </div>
+
+    <div id="directions"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.js"></script>
+    <script>
+        let map, routeLayer, avoidanceLayer, userMarker, watchId;
+        const apiKey = '5b3ce3597851110001cf62483ee3405e20b844b4b5e0390a3f701f55';
+        let avoidanceAreas = [];
+        let isShiftPressed = false;
+        let tempCenter = null;
+        let currentRoute = null;
+        let currentStepIndex = 0;
+        let isNavigationMode = false;
+
+        function initMap() {
+            map = L.map('map').setView([42.3601, -71.0942], 13); // Centered on Cambridge, MA
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            avoidanceLayer = L.layerGroup().addTo(map);
+            initAvoidanceAreaCreation();
+            
+            // Wait for the map to be fully loaded before initializing user location
+            map.whenReady(() => {
+                initUserLocation();
+            });
+        }
+
+        function initUserLocation() {
+            console.log("Initializing user location");
+            if ("geolocation" in navigator) {
+                watchId = navigator.geolocation.watchPosition(
+                    position => {
+                        console.log("Position update:", position.coords.latitude, position.coords.longitude);
+                        updateUserLocation(position.coords.latitude, position.coords.longitude);
+                    },
+                    error => {
+                        console.error("Error getting location:", error);
+                        alert("Unable to retrieve your location. Error: " + error.message);
+                    },
+                    { enableHighAccuracy: true }
+                );
+            } else {
+                console.log("Geolocation is not available in this browser.");
+                alert("Geolocation is not supported by your browser.");
+            }
+        }
+
+        function updateUserLocation(lat, lng) {
+            if (!userMarker) {
+                userMarker = L.marker([lat, lng], {
+                    icon: L.icon({
+                        iconUrl: 'beaver.png',
+                        iconSize: [30, 30]
+                    })
+                }).addTo(map);
+            } else {
+                userMarker.setLatLng([lat, lng]);
+            }
+            updateCurrentDirectionStep(lat, lng);
+            updateRouteProximityIndicator(lat, lng);
+        }
+
+        function initAvoidanceAreaCreation() {
+            // Event listener for shift key press/release
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Shift') isShiftPressed = true;
+            });
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'Shift') isShiftPressed = false;
+            });
+
+            // Event listener for map clicks
+            map.on('click', (e) => {
+                if (isShiftPressed) {
+                    if (!tempCenter) {
+                        tempCenter = e.latlng;
+                    } else {
+                        const radius = tempCenter.distanceTo(e.latlng);
+                        addAvoidanceArea(tempCenter, radius);
+                        tempCenter = null;
+                        updateAvoidanceList();
+                    }
+                }
+            });
+        }
+
+        function addAvoidanceArea(center, radius) {
+            const circle = L.circle(center, {radius: radius, color: 'red', fillOpacity: 0.3}).addTo(avoidanceLayer);
+            const newArea = {center: center, radius: radius, circle: circle};
+            avoidanceAreas.push(newArea);
+
+            // Add click event for deletion
+            circle.on('click', () => {
+                if (!isShiftPressed) {
+                    deleteAvoidanceArea(newArea)}
+             });
+        }
+
+        function deleteAvoidanceArea(area) {
+            avoidanceLayer.removeLayer(area.circle);
+            avoidanceAreas = avoidanceAreas.filter(a => a !== area);
+            updateAvoidanceList();
+        }
+
+        function clearAvoidanceAreas() {
+            avoidanceLayer.clearLayers();
+            avoidanceAreas = [];
+            updateAvoidanceList();
+        }
+
+        function updateAvoidanceList() {
+            const listElement = document.getElementById('avoidanceListItems');
+            listElement.innerHTML = '';
+            avoidanceAreas.forEach((area, index) => {
+                const li = document.createElement('li');
+                li.textContent = `Area ${index + 1}: Center [${area.center.lat.toFixed(4)}, ${area.center.lng.toFixed(4)}], Radius: ${area.radius.toFixed(2)}m`;
+                const deleteButton = document.createElement('button');
+                deleteButton.textContent = 'Delete';
+                deleteButton.onclick = () => deleteAvoidanceArea(area);
+                li.appendChild(deleteButton);
+                listElement.appendChild(li);
+            });
+        }
+
+        async function calculateRoute() {
+            const fromAddress = document.getElementById('fromAddress').value;
+            const toAddress = document.getElementById('toAddress').value;
+
+            const fromCoords = await geocode(fromAddress);
+            const toCoords = await geocode(toAddress);
+
+            if (!fromCoords || !toCoords) {
+                alert('Unable to geocode one or both addresses');
+                return;
+            }
+
+            const avoid_polygons = avoidanceAreas.map(area => {
+                const points = 64; // Number of points to approximate the circle
+                const coords = [];
+                for (let i = 0; i < points; i++) {
+                    const angle = (i / points) * 2 * Math.PI;
+                    const lat = area.center.lat + (area.radius / 111320) * Math.cos(angle);
+                    const lng = area.center.lng + (area.radius / (111320 * Math.cos(area.center.lat * Math.PI / 180))) * Math.sin(angle);
+                    coords.push([lng, lat]);
+                }
+                coords.push(coords[0]); // Close the polygon
+                return {
+                    "type": "Polygon",
+                    "coordinates": [coords]
+                };
+            });
+
+            const body = {
+                "coordinates": [[fromCoords.lon, fromCoords.lat], [toCoords.lon, toCoords.lat]],
+                "options": {
+                    "avoid_polygons": {
+                        "type": "MultiPolygon",
+                        "coordinates": avoid_polygons.map(p => p.coordinates)
+                    }
+                }
+            };
+
+            const url = `https://api.openrouteservice.org/v2/directions/cycling-regular/geojson`;
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': apiKey
+                    },
+                    body: JSON.stringify(body)
+                });
+                const data = await response.json();
+                console.log(data);
+                displayRoute(data);
+                displayDirections(data);
+            } catch (error) {
+                console.error('Error calculating route:', error);
+                alert('Error calculating route');
+            }
+        }
+
+        async function geocode(address) {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.length > 0) {
+                    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+                }
+            } catch (error) {
+                console.error('Error geocoding:', error);
+            }
+            return null;
+        }
+
+        function displayRoute(routeData) {
+            if (routeLayer) {
+                map.removeLayer(routeLayer);
+            }
+
+            const coordinates = routeData.features[0].geometry.coordinates;
+            const latLngs = coordinates.map(coord => [coord[1], coord[0]]);
+
+            routeLayer = L.polyline(latLngs, { color: 'blue' }).addTo(map);
+            map.fitBounds(routeLayer.getBounds());
+        }
+
+        function displayDirections(routeData) {
+            currentRoute = routeData;
+            const steps = routeData.features[0].properties.segments[0].steps;
+            const directionsDiv = document.getElementById('directionsContainer');
+            directionsDiv.innerHTML = '';
+            const ol = document.createElement('ol');
+            steps.forEach((step, index) => {
+                const li = document.createElement('li');
+                li.textContent = `${step.instruction} (${step.distance.toFixed(0)} meters)`;
+                li.id = `direction-step-${index}`;
+                ol.appendChild(li);
+            });
+            directionsDiv.appendChild(ol);
+            currentStepIndex = 0;
+            document.getElementById('toggleViewMode').style.display = 'block';
+            isNavigationMode = false;
+            updateStepDisplay();
+        }
+
+        //This whole toggle system is just scrapped together but OK i guess
+        function toggleViewMode() {
+            isNavigationMode = !isNavigationMode;
+            const button = document.getElementById('toggleViewMode');
+            button.textContent = isNavigationMode ? 'Show All Steps' : 'Start Navigation';
+            updateStepDisplay();
+        }
+
+        function confirmSteps() {
+            stepsConfirmed = true;
+            document.getElementById('confirmSteps').style.display = 'none';
+            updateStepDisplay();
+        }
+
+        function updateStepDisplay() {
+            if (!currentRoute) return;
+            const steps = currentRoute.features[0].properties.segments[0].steps;
+            const ol = document.getElementById('directionsContainer').querySelector('ol');
+            ol.innerHTML = '';
+
+            if (isNavigationMode) {
+                // Show only the next 3 steps
+                for (let i = currentStepIndex; i < Math.min(currentStepIndex + 3, steps.length); i++) {
+                    const li = document.createElement('li');
+                    li.textContent = `${steps[i].instruction} (${steps[i].distance.toFixed(0)} meters)`;
+                    li.id = `direction-step-${i}`;
+                    li.className = i === currentStepIndex ? 'current-step' : '';
+                    ol.appendChild(li);
+                }
+            } else {
+                // Show all steps
+                steps.forEach((step, index) => {
+                    const li = document.createElement('li');
+                    li.textContent = `${step.instruction} (${step.distance.toFixed(0)} meters)`;
+                    li.id = `direction-step-${index}`;
+                    ol.appendChild(li);
+                });
+            }
+        }
+
+        // Updates the current direction step based on user's location
+        function updateCurrentDirectionStep(lat, lng) {
+            if (!currentRoute || !stepsConfirmed) return;
+
+            const steps = currentRoute.features[0].properties.segments[0].steps;
+            const routeCoordinates = currentRoute.features[0].geometry.coordinates;
+
+            let closestPointIndex = findClosestPointOnRoute(lat, lng, routeCoordinates);
+            const closestPoint = routeCoordinates[closestPointIndex];
+            const distanceToRoute = calculateDistance(lat, lng, closestPoint[1], closestPoint[0]);
+            
+            if (distanceToRoute <= 0.05) { // 0.05 km = 50 meters
+                updateStepDisplay(closestPointIndex, steps);
+            } else {
+                console.log("User is not on the route");
+            }
+        }
+
+        // Function to update step display based on user's position
+        function updateCurrentDirectionStep(lat, lng) {
+            if (!currentRoute) return;
+            const steps = currentRoute.features[0].properties.segments[0].steps;
+            const routeCoordinates = currentRoute.features[0].geometry.coordinates;
+            let closestPointIndex = findClosestPointOnRoute(lat, lng, routeCoordinates);
+
+            // Find the current step based on the closest point
+            for (let i = currentStepIndex; i < steps.length; i++) {
+                if (closestPointIndex >= steps[i].way_points[0] && closestPointIndex <= steps[i].way_points[1]) {
+                    currentStepIndex = i;
+                    break;
+                }
+            }
+
+            updateStepDisplay();
+        }
+
+        function updateRouteProximityIndicator(lat, lng) {
+            if (!currentRoute) return;
+            const routeCoordinates = currentRoute.features[0].geometry.coordinates;
+            let closestPointIndex = findClosestPointOnRoute(lat, lng, routeCoordinates);
+            const closestPoint = routeCoordinates[closestPointIndex];
+            const distanceToRoute = calculateDistance(lat, lng, closestPoint[1], closestPoint[0]);
+
+            const indicator = document.getElementById('routeIndicator');
+            if (distanceToRoute <= 0.05) { // 50 meters
+                indicator.textContent = "You are on the route";
+                indicator.style.backgroundColor = "#90EE90"; // Light green
+            } else {
+                indicator.textContent = `You are ${(distanceToRoute * 1000).toFixed(0)} meters from the route`;
+                indicator.style.backgroundColor = "#FFB6C1"; // Light red
+            }
+        }
+
+         // Function to find the closest point on the route
+         function findClosestPointOnRoute(lat, lng, routeCoordinates) {
+            let closestPointIndex = 0;
+            let minDistance = Infinity;
+
+            routeCoordinates.forEach((coord, index) => {
+                const distance = calculateDistance(lat, lng, coord[1], coord[0]);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestPointIndex = index;
+                }
+            });
+
+            return closestPointIndex;
+        }
+
+        // Helper function to calculate distance between two points
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Radius of the Earth in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c; // Distance in km
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+</html>
