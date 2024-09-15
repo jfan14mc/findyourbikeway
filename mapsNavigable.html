@@ -6,17 +6,18 @@
         <meta http-equiv="X-UA-Compatible" content="ie=edge">
         <link href="style.css" rel="stylesheet" type="text/css">
         <style>
-            #map { height: 400px; width: 100%; }
-            #controls, #avoidanceAreas, #avoidanceList, #directions, #commonAvoidanceAreas { margin-top: 20px; }
+            #map { height: 450px; width: 100%; }
+            #controls, #avoidanceAreas, #avoidanceList, #directions, #commonAvoidanceAreas { margin-top: 10px; }
             input, button, textarea { margin: 5px; }
             .avoidance-area { cursor: pointer; }
-            .current-step { font-weight: bold; color: #0000FF; }
             #directionsContainer {
                 max-height: 200px;
                 overflow-y: auto;
                 border: 1px solid #ccc;
                 padding: 5px;
                 margin-top: 10px;
+                margin-left: 10px;
+                margin-right: 10px;
                 text-align: left;
             }
             #routeIndicator {
@@ -24,6 +25,27 @@
                 margin-top: 5px;
                 background-color: #f0f0f0;
                 border-radius: 5px;
+            }
+            #resetZoomBtn {
+                position: absolute;
+                bottom: -10px;
+                left: 10px;
+                z-index: 1000;
+                background-color: white;
+                border: 2px solid #ccc;
+                padding: 5px;
+                border-radius: 5px;
+            }
+            .navigation-step {
+                margin: 0;
+                padding: 5px 0;
+            }
+            .navigation-step.current-step {
+                font-weight: bold;
+                color: white;
+                background-color: #007bff;
+                border-radius: 5px;
+                padding: 5px;
             }
         </style>
     </head>
@@ -45,8 +67,10 @@
 
 
     <div id="map"></div>
+        <button id="resetZoomBtn" onclick="resetZoom()">Reset Zoom</button>
+    </div>
     <div id="directionsContainer"></div>
-    <button id="toggleViewMode" onclick="toggleViewMode()">Confirm Steps</button>
+    <button id="toggleViewMode" onclick="toggleViewMode()">Start Navigation</button>
     <div id="routeIndicator"></div>
     <div id="controls">
         <input type="text" id="fromAddress" placeholder="From Address" value="273 Babcock St, Boston, MA 02215">
@@ -78,7 +102,11 @@
         let isNavigationMode = false;
 
         function initMap() {
-            map = L.map('map').setView([42.3601, -71.0942], 13); // Centered on Cambridge, MA
+            map = L.map('map', {
+                dragging: true,
+                tap: false
+            }).setView([42.3601, -71.0942], 13);
+
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '© OpenStreetMap contributors'
             }).addTo(map);
@@ -117,14 +145,29 @@
                 userMarker = L.marker([lat, lng], {
                     icon: L.icon({
                         iconUrl: 'beaver.png',
-                        iconSize: [30, 30]
-                    })
+                        iconSize: [30, 30],
+                    }),
                 }).addTo(map);
             } else {
                 userMarker.setLatLng([lat, lng]);
             }
             updateCurrentDirectionStep(lat, lng);
             updateRouteProximityIndicator(lat, lng);
+
+            if (isNavigationMode) {
+                map.setView([lat, lng]);
+            }
+        }
+
+
+        function resetZoom() {
+            if (isNavigationMode && userMarker) {
+                map.setView(userMarker.getLatLng(), 18);
+            } else if (routeLayer) {
+                map.fitBounds(routeLayer.getBounds());
+            } else {
+                map.setView([42.3601, -71.0942], 13);
+            }
         }
 
         function initAvoidanceAreaCreation() {
@@ -299,6 +342,12 @@
             const button = document.getElementById('toggleViewMode');
             button.textContent = isNavigationMode ? 'Show All Steps' : 'Start Navigation';
             updateStepDisplay();
+
+            if (isNavigationMode && userMarker) {
+                map.setView(userMarker.getLatLng(), 18);
+            } else if (routeLayer) {
+                map.fitBounds(routeLayer.getBounds());
+            }
         }
 
         function confirmSteps() {
@@ -308,30 +357,37 @@
         }
 
         function updateStepDisplay() {
-            if (!currentRoute) return;
-            const steps = currentRoute.features[0].properties.segments[0].steps;
-            const ol = document.getElementById('directionsContainer').querySelector('ol');
-            ol.innerHTML = '';
+                if (!currentRoute) return;
+                const steps = currentRoute.features[0].properties.segments[0].steps;
+                const directionsContainer = document.getElementById('directionsContainer');
+                directionsContainer.innerHTML = '';
 
-            if (isNavigationMode) {
-                // Show only the next 3 steps
-                for (let i = currentStepIndex; i < Math.min(currentStepIndex + 3, steps.length); i++) {
-                    const li = document.createElement('li');
-                    li.textContent = `${steps[i].instruction} (${steps[i].distance.toFixed(0)} meters)`;
-                    li.id = `direction-step-${i}`;
-                    li.className = i === currentStepIndex ? 'current-step' : '';
-                    ol.appendChild(li);
+                if (isNavigationMode) {
+                    // Show only the next 3 steps without numbers
+                    const div = document.createElement('div');
+                    for (let i = currentStepIndex; i < Math.min(currentStepIndex + 3, steps.length); i++) {
+                        const p = document.createElement('p');
+                        p.textContent = `${steps[i].instruction} (${steps[i].distance.toFixed(0)} meters)`;
+                        p.id = `direction-step-${i}`;
+                        p.className = 'navigation-step';
+                        if (i === currentStepIndex) {
+                            p.classList.add('current-step');
+                        }
+                        div.appendChild(p);
+                    }
+                    directionsContainer.appendChild(div);
+                } else {
+                    // Show all steps with numbers
+                    const ol = document.createElement('ol');
+                    steps.forEach((step, index) => {
+                        const li = document.createElement('li');
+                        li.textContent = `${step.instruction} (${step.distance.toFixed(0)} meters)`;
+                        li.id = `direction-step-${index}`;
+                        ol.appendChild(li);
+                    });
+                    directionsContainer.appendChild(ol);
                 }
-            } else {
-                // Show all steps
-                steps.forEach((step, index) => {
-                    const li = document.createElement('li');
-                    li.textContent = `${step.instruction} (${step.distance.toFixed(0)} meters)`;
-                    li.id = `direction-step-${index}`;
-                    ol.appendChild(li);
-                });
             }
-        }
 
         // Updates the current direction step based on user's location
         function updateCurrentDirectionStep(lat, lng) {
