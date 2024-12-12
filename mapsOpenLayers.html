@@ -249,17 +249,6 @@
                             geometry: new ol.geom.Point(userCoords)
                         });
                         userLocationSource.addFeature(userMarker);
-
-                        // Enable navigation button if near start point
-                        if (currentRoute) {
-                            const routeStart = currentRoute.features[0].geometry.coordinates[0];
-                            const distance = haversineDistance(
-                                lat, lon, 
-                                routeStart[1], routeStart[0]
-                            );
-
-                            navigationBtn.disabled = distance > 100;
-                        }
                     },
                     (error) => {
                         displayError(`Geolocation error: ${error.message}`);
@@ -300,31 +289,48 @@
             displayRouteInstructions();
 
             let prevLat = null, prevLon = null;
+            let deviceHeading = null;
             const headingHistory = [];
             const MAX_HISTORY = 5;
+
+            // Device orientation event listener for absolute heading
+            window.addEventListener('deviceorientation', (event) => {
+                if (event.webkitCompassHeading) {
+                    // For iOS devices
+                    deviceHeading = event.webkitCompassHeading;
+                } else if (event.absolute && event.alpha !== null) {
+                    // For other browsers supporting the standard API
+                    // Convert alpha to compass heading (0-360 degrees)
+                    deviceHeading = 360 - event.alpha;
+                }
+            });
 
             navigator.geolocation.watchPosition(
                 (position) => {
                     const lon = position.coords.longitude;
                     const lat = position.coords.latitude;
                     
-                    // Calculate heading from movement if possible
-                    let heading = 0;
-                    if (prevLat !== null && prevLon !== null) {
+                    // Prioritize device orientation heading if available
+                    let heading = deviceHeading;
+
+                    // Fallback to movement-based heading if device orientation is not available
+                    if (heading === null && prevLat !== null && prevLon !== null) {
                         heading = calculateHeading(prevLat, prevLon, lat, lon);
                     }
 
                     // Smooth heading
-                    headingHistory.push(heading);
-                    if (headingHistory.length > MAX_HISTORY) {
-                        headingHistory.shift();
-                    }
-                    const smoothedHeading = headingHistory.reduce((a, b) => a + b, 0) / headingHistory.length;
+                    if (heading !== null) {
+                        headingHistory.push(heading);
+                        if (headingHistory.length > MAX_HISTORY) {
+                            headingHistory.shift();
+                        }
+                        const smoothedHeading = headingHistory.reduce((a, b) => a + b, 0) / headingHistory.length;
 
-                    const userCoords = ol.proj.fromLonLat([lon, lat]);
-                    map.getView().setRotation(-smoothedHeading * Math.PI / 180);
-                    map.getView().setCenter(userCoords);
-                    map.getView().setZoom(18);
+                        const userCoords = ol.proj.fromLonLat([lon, lat]);
+                        map.getView().setRotation(-smoothedHeading * Math.PI / 180);
+                        map.getView().setCenter(userCoords);
+                        map.getView().setZoom(18);
+                    }
 
                     prevLat = lat;
                     prevLon = lon;
@@ -339,6 +345,14 @@
                     maximumAge: 0
                 }
             );
+        }
+
+        // You'll need to add a missing calculateHeading function if not already present
+        function calculateHeading(lat1, lon1, lat2, lon2) {
+            const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) - 
+                    Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+            return Math.atan2(y, x) * 180 / Math.PI;
         }
 
         // Exit navigation mode
@@ -395,7 +409,6 @@
             });
         }
 
-        // Existing route calculation function (modified to store route)
         async function calculateRoute() {
             // Clear previous errors and routes
             clearErrors();
