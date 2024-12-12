@@ -83,7 +83,9 @@
         let currentRoute = null;
         let watchPositionId = null;
         let navigationMode = false;
-        let routeInstructions = [];
+        let headingLockEnabled = true;
+        let userPositionData = null;
+        let headingLockedRotationInteraction;
 
         // Error display function
         function displayError(message) {
@@ -203,8 +205,67 @@
             }
         });
 
+        function toggleHeadingLock() {
+            headingLockEnabled = !headingLockEnabled;
+            const headingLockSwitch = document.getElementById('heading-lock-switch');
+            headingLockSwitch.checked = headingLockEnabled;
 
-        // Haversine formula to calculate distance between two points
+            // Update the heading-locked rotation interaction
+            if (headingLockedRotationInteraction) {
+                headingLockedRotationInteraction.setHeadingLockEnabled(headingLockEnabled);
+            }
+
+            if (!headingLockEnabled) {
+                // Reset map rotation to allow free rotation
+                map.getView().setRotation(0);
+            }
+}
+        
+        function createHeadingLockSwitch() {
+            const switchContainer = document.createElement('div');
+            switchContainer.style.position = 'absolute';
+            switchContainer.style.bottom = '20px';
+            switchContainer.style.right = '20px';
+            switchContainer.style.zIndex = '1000';
+            switchContainer.style.backgroundColor = 'white';
+            switchContainer.style.padding = '10px';
+            switchContainer.style.borderRadius = '5px';
+            switchContainer.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+
+            const switchLabel = document.createElement('label');
+            switchLabel.innerHTML = 'Lock Heading ';
+            
+            const switchInput = document.createElement('input');
+            switchInput.type = 'checkbox';
+            switchInput.id = 'heading-lock-switch';
+            switchInput.checked = true;
+            switchInput.addEventListener('change', toggleHeadingLock);
+
+            switchLabel.appendChild(switchInput);
+            switchContainer.appendChild(switchLabel);
+            
+            map.getTargetElement().appendChild(switchContainer);
+        }
+
+        class HeadingLockedRotation extends ol.interaction.Interaction {
+            constructor(options = {}) {
+                super(options);
+                this.headingLockEnabled = true;
+            }
+
+            handleEvent(mapBrowserEvent) {
+                if (this.headingLockEnabled && mapBrowserEvent.type === 'rotate') {
+                    // Prevent rotation when heading lock is on
+                    return false;
+                }
+                return true;
+            }
+
+            setHeadingLockEnabled(enabled) {
+                this.headingLockEnabled = enabled;
+            }
+        }
+
         function haversineDistance(lat1, lon1, lat2, lon2) {
             const R = 6371e3; // Earth's radius in meters
             const φ1 = lat1 * Math.PI / 180;
@@ -220,7 +281,6 @@
             return R * c;
         }
 
-        // Continuous location tracking
         function startContinuousTracking() {
             const geolocationBtn = document.getElementById('geolocation-btn');
             const navigationBtn = document.getElementById('navigation-btn');
@@ -233,6 +293,7 @@
 
             if ("geolocation" in navigator) {
                 geolocationBtn.disabled = true;
+                navigationBtn.disabled = false;
                 geolocationBtn.textContent = '📍 Tracking...';
 
                 watchPositionId = navigator.geolocation.watchPosition(
@@ -240,6 +301,13 @@
                         const lon = position.coords.longitude;
                         const lat = position.coords.latitude;
                         const userCoords = ol.proj.fromLonLat([lon, lat]);
+
+                        // Store position data for navigation mode
+                        userPositionData = {
+                            longitude: lon,
+                            latitude: lat,
+                            coords: userCoords
+                        };
 
                         // Clear previous user marker
                         userLocationSource.clear();
@@ -254,6 +322,8 @@
                         displayError(`Geolocation error: ${error.message}`);
                         geolocationBtn.disabled = false;
                         geolocationBtn.textContent = '📍 Track Location';
+                        navigationBtn.disabled = true;
+                        userPositionData = null;
                     },
                     {
                         enableHighAccuracy: true,
@@ -269,85 +339,118 @@
             }
         }
 
-        // Toggle navigation mode
+        // Updated toggle navigation mode
         function toggleNavigationMode() {
-            navigationMode = !navigationMode;
             const navigationBtn = document.getElementById('navigation-btn');
+            
+            // Check if geolocation data is available
+            if (!userPositionData && !navigationMode) {
+                displayError('Please start location tracking first');
+                return;
+            }
 
             if (navigationMode) {
-                navigationBtn.textContent = '🧭 Exit Navigation';
-                startNavigation();
-            } else {
                 navigationBtn.textContent = '🧭 Navigation';
                 exitNavigation();
+            } else {
+                navigationBtn.textContent = '🧭 Exit Navigation';
+                startNavigation();
             }
+            navigationMode = !navigationMode;
         }
 
-        // Start navigation mode
         function startNavigation() {
-            if (!currentRoute) return;
-            displayRouteInstructions();
-
-            let prevLat = null, prevLon = null;
-            let deviceHeading = null;
-            const headingHistory = [];
-            const MAX_HISTORY = 5;
-
-            // Device orientation event listener for absolute heading
-            window.addEventListener('deviceorientation', (event) => {
-                if (event.webkitCompassHeading) {
-                    // For iOS devices
-                    deviceHeading = event.webkitCompassHeading;
-                } else if (event.absolute && event.alpha !== null) {
-                    // For other browsers supporting the standard API
-                    // Convert alpha to compass heading (0-360 degrees)
-                    deviceHeading = 360 - event.alpha;
-                }
-            });
-
-            navigator.geolocation.watchPosition(
-                (position) => {
-                    const lon = position.coords.longitude;
-                    const lat = position.coords.latitude;
-                    
-                    // Prioritize device orientation heading if available
-                    let heading = deviceHeading;
-
-                    // Fallback to movement-based heading if device orientation is not available
-                    if (heading === null && prevLat !== null && prevLon !== null) {
-                        heading = calculateHeading(prevLat, prevLon, lat, lon);
-                    }
-
-                    // Smooth heading
-                    if (heading !== null) {
-                        headingHistory.push(heading);
-                        if (headingHistory.length > MAX_HISTORY) {
-                            headingHistory.shift();
-                        }
-                        const smoothedHeading = headingHistory.reduce((a, b) => a + b, 0) / headingHistory.length;
-
-                        const userCoords = ol.proj.fromLonLat([lon, lat]);
-                        map.getView().setRotation(-smoothedHeading * Math.PI / 180);
-                        map.getView().setCenter(userCoords);
-                        map.getView().setZoom(18);
-                    }
-
-                    prevLat = lat;
-                    prevLon = lon;
-                },
-                (error) => {
-                    displayError(`Navigation error: ${error.message}`);
-                    toggleNavigationMode();
-                },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                }
-            );
+        // Check if geolocation data is available
+        if (!userPositionData) {
+            displayError('Geolocation tracking must be started first');
+            return;
         }
 
-        // You'll need to add a missing calculateHeading function if not already present
+        const navigationBtn = document.getElementById('navigation-btn');
+        let prevLat = null, prevLon = null;
+        let deviceHeading = null;
+        const headingHistory = [];
+        const MAX_HISTORY = 5;
+
+        // Disable map panning interactions
+        map.getInteractions().forEach(interaction => {
+            if (interaction instanceof ol.interaction.DragPan) {
+                interaction.setActive(false);
+            }
+        });
+
+        // Create and add heading-locked rotation interaction
+        headingLockedRotationInteraction = new HeadingLockedRotation();
+        map.addInteraction(headingLockedRotationInteraction);
+
+        // Create heading lock switch
+        createHeadingLockSwitch();
+
+        // Device orientation event listener for absolute heading
+        window.addEventListener('deviceorientation', (event) => {
+            if (event.webkitCompassHeading) {
+                // For iOS devices
+                deviceHeading = event.webkitCompassHeading;
+            } else if (event.absolute && event.alpha !== null) {
+                // Convert alpha to compass heading (0-360 degrees)
+                deviceHeading = 360 - event.alpha;
+            }
+        });
+
+        const watchOptions = {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+        };
+
+        const watchCallback = (position) => {
+            const lon = position.coords.longitude;
+            const lat = position.coords.latitude;
+            
+            // Prioritize device orientation heading if available
+            let heading = deviceHeading;
+
+            // Fallback to movement-based heading if device orientation is not available
+            if (heading === null && prevLat !== null && prevLon !== null) {
+                heading = calculateHeading(prevLat, prevLon, lat, lon);
+            }
+
+            // Smooth heading
+            if (heading !== null) {
+                headingHistory.push(heading);
+                if (headingHistory.length > MAX_HISTORY) {
+                    headingHistory.shift();
+                }
+                const smoothedHeading = headingHistory.reduce((a, b) => a + b, 0) / headingHistory.length;
+
+                const userCoords = ol.proj.fromLonLat([lon, lat]);
+
+                // Always center zoom on user's location
+                const view = map.getView();
+                view.setCenter(userCoords);
+
+                // Only rotate map if heading lock is enabled
+                if (headingLockEnabled) {
+                    view.setRotation(-smoothedHeading * Math.PI / 180);
+                }
+            }
+
+            prevLat = lat;
+            prevLon = lon;
+        };
+
+        // Use the existing watchPositionId to track position
+        navigator.geolocation.clearWatch(watchPositionId);
+        watchPositionId = navigator.geolocation.watchPosition(
+            watchCallback,
+            (error) => {
+                displayError(`Navigation error: ${error.message}`);
+                toggleNavigationMode();
+            },
+            watchOptions
+        );
+    }
+
         function calculateHeading(lat1, lon1, lat2, lon2) {
             const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
             const x = Math.cos(lat1) * Math.sin(lat2) - 
@@ -355,10 +458,28 @@
             return Math.atan2(y, x) * 180 / Math.PI;
         }
 
-        // Exit navigation mode
         function exitNavigation() {
+            // Remove heading-locked rotation interaction
+            if (headingLockedRotationInteraction) {
+                map.removeInteraction(headingLockedRotationInteraction);
+                headingLockedRotationInteraction = null;
+            }
+
             // Reset map rotation
             map.getView().setRotation(0);
+
+            // Re-enable map panning interactions
+            map.getInteractions().forEach(interaction => {
+                if (interaction instanceof ol.interaction.DragPan) {
+                    interaction.setActive(true);
+                }
+            });
+
+            // Remove heading lock switch
+            const headingLockSwitch = document.getElementById('heading-lock-switch')?.parentElement;
+            if (headingLockSwitch) {
+                headingLockSwitch.remove();
+            }
 
             // Clear route instructions
             document.getElementById('route-instructions').innerHTML = '';
@@ -379,8 +500,7 @@
                 });
             }
         }
-
-
+        
         // Modify displayRouteInstructions to support both preview and navigation modes
         function displayRouteInstructions() {
             if (!currentRoute || !currentRoute.features[0]) return;
@@ -491,7 +611,6 @@
 
                 // Prepare navigation button
                 const navigationBtn = document.getElementById('navigation-btn');
-                navigationBtn.disabled = true; // Will be enabled when near start point
 
             } catch (error) {
                 displayError(`Route calculation error: ${error.message}`);
@@ -505,7 +624,6 @@
                 ? [parseFloat(data[0].lon), parseFloat(data[0].lat)]
                 : null;
         }
-
 
         // Helper function to create a circular polygon for avoidance areas
         function createCirclePolygon(center, radiusKm) {
