@@ -370,7 +370,9 @@
         let prevLat = null, prevLon = null;
         let deviceHeading = null;
         const headingHistory = [];
-        const MAX_HISTORY = 5;
+        const MAX_HISTORY = 3; // Reduced from 5 to make it more responsive
+        const HEADING_UPDATE_INTERVAL = 100; // Milliseconds between heading calculations
+
 
         // Disable map panning interactions
         map.getInteractions().forEach(interaction => {
@@ -403,11 +405,20 @@
             maximumAge: 0
         };
 
+        let headingUpdateTimer = setInterval(() => {
+            if (headingHistory.length > 0) {
+                const smoothedHeading = headingHistory.reduce((a, b) => a + b, 0) / headingHistory.length;
+
+                if (headingLockEnabled) {
+                    map.getView().setRotation(-smoothedHeading * Math.PI / 180);
+                }
+            }
+        }, HEADING_UPDATE_INTERVAL);
+
         const watchCallback = (position) => {
             const lon = position.coords.longitude;
             const lat = position.coords.latitude;
             
-            // Prioritize device orientation heading if available
             let heading = deviceHeading;
 
             // Fallback to movement-based heading if device orientation is not available
@@ -421,18 +432,9 @@
                 if (headingHistory.length > MAX_HISTORY) {
                     headingHistory.shift();
                 }
-                const smoothedHeading = headingHistory.reduce((a, b) => a + b, 0) / headingHistory.length;
 
                 const userCoords = ol.proj.fromLonLat([lon, lat]);
-
-                // Always center zoom on user's location
-                const view = map.getView();
-                view.setCenter(userCoords);
-
-                // Only rotate map if heading lock is enabled
-                if (headingLockEnabled) {
-                    view.setRotation(-smoothedHeading * Math.PI / 180);
-                }
+                map.getView().setCenter(userCoords);
             }
 
             prevLat = lat;
