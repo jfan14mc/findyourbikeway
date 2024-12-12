@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Get-A-Way</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css">
+    <style>
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            height: 100%; 
+            font-family: Arial, sans-serif; 
+        }
+        #map { 
+            width: 100%; 
+            height: calc(100vh - 250px); 
+        }
+        #routing-container {
+            display: flex;
+            padding: 10px;
+            background-color: #f0f0f0;
+        }
+        #routing-container input {
+            flex-grow: 1;
+            margin-right: 10px;
+            padding: 5px;
+        }
+        #avoidance-areas {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #e0e0e0;
+        }
+        #error-display {
+            color: red;
+            padding: 10px;
+            background-color: #ffeeee;
+        }
+        #geolocation-btn, #navigation-btn {
+            margin-left: 10px;
+            padding: 5px 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #geolocation-btn:disabled, #navigation-btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #route-instructions {
+            background-color: #f9f9f9;
+            padding: 10px;
+            border-top: 1px solid #ddd;
+        }
+        .instruction {
+            margin-bottom: 5px;
+            padding: 5px;
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <div id="routing-container">
+        <input type="text" id="start-input" placeholder="Start Location" value="8300 Baltimore Ave">
+        <input type="text" id="end-input" placeholder="Destination" value="Bladensburg Waterfront Park">
+        <button onclick="calculateRoute()">Find Route</button>
+        <button id="geolocation-btn" onclick="startContinuousTracking()">📍 Track Location</button>
+        <button id="navigation-btn" onclick="toggleNavigationMode()" disabled>🧭 Navigation</button>
+    </div>
+    <div id="avoidance-areas">
+        <p>Ctrl-click to create avoidance areas (first click sets center, second sets radius)</p>
+    </div>
+    <div id="error-display"></div>
+    <div id="map"></div>
+    <div id="route-instructions"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
+    <script>
+        // OpenRouteService API key (replace with your own)
+        const ORS_API_KEY = '5b3ce3597851110001cf6248dbbdc789398f41cfa1403cf2b18e5bdf';
+
+        // Global variables for tracking
+        let currentRoute = null;
+        let watchPositionId = null;
+        let navigationMode = false;
+        let routeInstructions = [];
+
+        // Error display function
+        function displayError(message) {
+            const errorDisplay = document.getElementById('error-display');
+            errorDisplay.textContent = message;
+            console.error(message);
+        }
+
+        // Clear previous errors
+        function clearErrors() {
+            const errorDisplay = document.getElementById('error-display');
+            errorDisplay.textContent = '';
+        }
+
+        // Initialize map
+        const map = new ol.Map({
+            target: 'map',
+            layers: [
+                new ol.layer.Tile({
+                    source: new ol.source.OSM()
+                })
+            ],
+            view: new ol.View({
+                center: ol.proj.fromLonLat([-76.94260941249034, 38.98597311823279]), // McKeldin Mall
+                zoom: 14,
+                rotation: 0
+            })
+        });
+
+        // Create vector layers for routes, avoidance areas, and user location
+        const routeSource = new ol.source.Vector();
+        const routeLayer = new ol.layer.Vector({
+            source: routeSource,
+            style: new ol.style.Style({
+                stroke: new ol.style.Stroke({
+                    color: 'blue',
+                    width: 5
+                })
+            })
+        });
+
+        const avoidanceSource = new ol.source.Vector();
+        const avoidanceLayer = new ol.layer.Vector({
+            source: avoidanceSource,
+            style: new ol.style.Style({
+                fill: new ol.style.Fill({
+                    color: 'rgba(255, 0, 0, 0.3)'
+                }),
+                stroke: new ol.style.Stroke({
+                    color: 'red',
+                    width: 2
+                })
+            })
+        });
+
+        // Create user location layer
+        const userLocationSource = new ol.source.Vector();
+        const userLocationLayer = new ol.layer.Vector({
+            source: userLocationSource,
+            style: new ol.style.Style({
+                image: new ol.style.Circle({
+                    radius: 8,
+                    fill: new ol.style.Fill({color: 'blue'}),
+                    stroke: new ol.style.Stroke({color: 'white', width: 3})
+                })
+            })
+        });
+
+        map.addLayer(routeLayer);
+        map.addLayer(avoidanceLayer);
+        map.addLayer(userLocationLayer);
+
+        // Avoidance area creation variables
+        let avoidanceCenter = null;
+        let avoidanceDrawing = false;
+
+        // Map click handler for avoidance areas
+        map.on('click', (event) => {
+            // Check for feature at click location
+            const feature = map.forEachFeatureAtPixel(event.pixel, 
+                (feature, layer) => feature,
+                { layerFilter: () => true }
+            );
+
+            // Remove feature if clicked and it's an avoidance area
+            if (feature && feature.getGeometry() instanceof ol.geom.Circle) {
+                avoidanceSource.removeFeature(feature);
+                return;
+            }
+
+            // Create avoidance area on ctrl-click
+            if (event.originalEvent.ctrlKey) {
+                const coordinate = event.coordinate;
+                
+                if (!avoidanceCenter) {
+                    // First ctrl-click: set center
+                    avoidanceCenter = coordinate;
+                    avoidanceDrawing = true;
+                } else {
+                    // Second ctrl-click: complete circle with projection-based radius
+                    const resolution = map.getView().getResolution();
+                    const radius = Math.sqrt(
+                        Math.pow(coordinate[0] - avoidanceCenter[0], 2) +
+                        Math.pow(coordinate[1] - avoidanceCenter[1], 2)
+                    );
+
+                    // Create circle feature
+                    const circle = new ol.Feature(
+                        new ol.geom.Circle(avoidanceCenter, radius)
+                    );
+                    avoidanceSource.addFeature(circle);
+
+                    // Reset drawing state
+                    avoidanceCenter = null;
+                    avoidanceDrawing = false;
+                }
+            }
+        });
+
+
+        // Haversine formula to calculate distance between two points
+        function haversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // Earth's radius in meters
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            return R * c;
+        }
+
+        // Continuous location tracking
+        function startContinuousTracking() {
+            const geolocationBtn = document.getElementById('geolocation-btn');
+            const navigationBtn = document.getElementById('navigation-btn');
+            
+            // Clear previous tracking and user location
+            if (watchPositionId) {
+                navigator.geolocation.clearWatch(watchPositionId);
+            }
+            userLocationSource.clear();
+
+            if ("geolocation" in navigator) {
+                geolocationBtn.disabled = true;
+                geolocationBtn.textContent = '📍 Tracking...';
+
+                watchPositionId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const lon = position.coords.longitude;
+                        const lat = position.coords.latitude;
+                        const userCoords = ol.proj.fromLonLat([lon, lat]);
+
+                        // Clear previous user marker
+                        userLocationSource.clear();
+
+                        // Create and add user location marker
+                        const userMarker = new ol.Feature({
+                            geometry: new ol.geom.Point(userCoords)
+                        });
+                        userLocationSource.addFeature(userMarker);
+
+                        // Enable navigation button if near start point
+                        if (currentRoute) {
+                            const routeStart = currentRoute.features[0].geometry.coordinates[0];
+                            const distance = haversineDistance(
+                                lat, lon, 
+                                routeStart[1], routeStart[0]
+                            );
+
+                            navigationBtn.disabled = distance > 100;
+                        }
+                    },
+                    (error) => {
+                        displayError(`Geolocation error: ${error.message}`);
+                        geolocationBtn.disabled = false;
+                        geolocationBtn.textContent = '📍 Track Location';
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 0
+                    }
+                );
+
+                geolocationBtn.textContent = '📍 Stop Tracking';
+                geolocationBtn.disabled = false;
+            } else {
+                displayError('Geolocation is not supported by your browser');
+            }
+        }
+
+        // Toggle navigation mode
+        function toggleNavigationMode() {
+            navigationMode = !navigationMode;
+            const navigationBtn = document.getElementById('navigation-btn');
+
+            if (navigationMode) {
+                navigationBtn.textContent = '🧭 Exit Navigation';
+                startNavigation();
+            } else {
+                navigationBtn.textContent = '🧭 Navigation';
+                exitNavigation();
+            }
+        }
+
+        // Start navigation mode
+        function startNavigation() {
+            if (!currentRoute) return;
+
+            // Display all route instructions
+            displayRouteInstructions();
+
+            // Watch position for navigation updates
+            navigator.geolocation.watchPosition(
+                (position) => {
+                    const lon = position.coords.longitude;
+                    const lat = position.coords.latitude;
+                    const heading = position.coords.heading || 0;
+                    const userCoords = ol.proj.fromLonLat([lon, lat]);
+
+                    // Rotate map to match user's heading
+                    map.getView().setRotation(-heading * Math.PI / 180);
+
+                    // Center map on user's current location and zoom in
+                    map.getView().setCenter(userCoords);
+                    map.getView().setZoom(16);  // Closer zoom level during navigation
+                },
+                (error) => {
+                    displayError(`Navigation error: ${error.message}`);
+                    toggleNavigationMode(); // Exit navigation
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        }
+
+        // Exit navigation mode
+        function exitNavigation() {
+            // Reset map rotation
+            map.getView().setRotation(0);
+
+            // Clear route instructions
+            document.getElementById('route-instructions').innerHTML = '';
+
+            // Zoom back to full route
+            if (currentRoute) {
+                const routeFeature = new ol.Feature({
+                    geometry: new ol.geom.LineString(
+                        currentRoute.features[0].geometry.coordinates.map(
+                            coord => ol.proj.fromLonLat(coord)
+                        )
+                    )
+                });
+                const extent = routeFeature.getGeometry().getExtent();
+                map.getView().fit(extent, {
+                    padding: [50, 50, 50, 50],
+                    duration: 1000
+                });
+            }
+        }
+
+
+        // Modify displayRouteInstructions to support both preview and navigation modes
+        function displayRouteInstructions() {
+            if (!currentRoute || !currentRoute.features[0]) return;
+
+            const instructionsContainer = document.getElementById('route-instructions');
+            instructionsContainer.innerHTML = ''; // Clear previous instructions
+
+            // Get all steps from the route
+            const allSteps = currentRoute.features[0].properties.segments[0].steps;
+            
+            // Determine which instructions to show based on navigation mode
+            const instructionsToShow = navigationMode 
+                ? allSteps.slice(0, 2)  // Only next 3 in navigation mode
+                : allSteps;  // All instructions in preview mode
+
+            // Create and append instructions
+            instructionsToShow.forEach((step, index) => {
+                const div = document.createElement('div');
+                div.classList.add('instruction');
+                
+                // Get direction symbol and format distance
+                const distanceKm = (step.distance / 1000).toFixed(2);
+                
+                div.textContent = ` ${step.instruction} (${distanceKm} km)`;
+                instructionsContainer.appendChild(div);
+            });
+        }
+
+        // Existing route calculation function (modified to store route)
+        async function calculateRoute() {
+            // Clear previous errors and routes
+            clearErrors();
+            routeSource.clear();
+
+            const startInput = document.getElementById('start-input').value;
+            const endInput = document.getElementById('end-input').value;
+
+            try {
+                // Geocode start and end locations
+                const startCoords = await geocode(startInput);
+                const endCoords = await geocode(endInput);
+
+                if (!startCoords || !endCoords) {
+                    displayError('Could not find one or both locations');
+                    return;
+                }
+
+                // Prepare avoidance polygons (existing code)
+                const avoidanceAreas = avoidanceSource.getFeatures().map(feature => {
+                    const geometry = feature.getGeometry();
+                    const center = ol.proj.toLonLat(geometry.getCenter());
+                    const radius = geometry.getRadius() / 1000;
+                    
+                    return [createCirclePolygon(center, radius)]
+                });
+
+                // Prepare request to OpenRouteService
+                const routeRequest = {
+                    "coordinates": [[startCoords[0], startCoords[1]], [endCoords[0], endCoords[1]]],
+                    "options": {
+                        "avoid_polygons": {
+                            "type": "MultiPolygon",
+                            "coordinates": avoidanceAreas
+                        }  
+                    },
+                    "instructions": true // Request detailed instructions
+                };
+
+                // Fetch route from OpenRouteService
+                const response = await fetch('https://api.openrouteservice.org/v2/directions/cycling-regular/geojson', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': ORS_API_KEY
+                    },
+                    body: JSON.stringify(routeRequest)
+                });
+
+                // Check if response is ok
+                if (!response.ok) {
+                    const errorBody = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, body: ${errorBody}`);
+                }
+
+                // Store route globally
+                currentRoute = await response.json();
+
+                // Create route feature
+                const routeFeature = new ol.Feature({
+                    geometry: new ol.geom.LineString(
+                        currentRoute.features[0].geometry.coordinates.map(
+                            coord => ol.proj.fromLonLat(coord)
+                        )
+                    )
+                });
+
+                // Add route to vector source
+                routeSource.addFeature(routeFeature);
+
+                // Zoom to route
+                const extent = routeFeature.getGeometry().getExtent();
+                map.getView().fit(extent, {
+                    padding: [50, 50, 50, 50],
+                    duration: 1000
+                });
+
+                // Display route instructions
+                displayRouteInstructions();
+
+                // Prepare navigation button
+                const navigationBtn = document.getElementById('navigation-btn');
+                navigationBtn.disabled = true; // Will be enabled when near start point
+
+            } catch (error) {
+                displayError(`Route calculation error: ${error.message}`);
+            }
+        }
+
+        async function geocode(query) {
+            const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            return data.length > 0 
+                ? [parseFloat(data[0].lon), parseFloat(data[0].lat)]
+                : null;
+        }
+
+
+        // Helper function to create a circular polygon for avoidance areas
+        function createCirclePolygon(center, radiusKm) {
+            const polygon = [];
+
+            // Number of points to approximate the circle
+            const numPoints = 36;
+
+            for (let i = 0; i <= numPoints; i++) {
+                const bearing = (i * 360) / numPoints;
+                const point = destinationPoint(center[1], center[0], radiusKm, bearing);
+                polygon.push(point);
+            }
+
+            // Close the polygon by repeating the first point
+            polygon.push(polygon[0]);
+
+            return polygon;
+        }
+
+        // Helper function to calculate destination point given distance and bearing
+        function destinationPoint(lat, lon, distance, bearing) {
+            const earthRadius = 6371; // kilometers
+            const δ = distance / earthRadius;
+            const θ = bearing * Math.PI / 180;
+
+            const φ1 = lat * Math.PI / 180;
+            const λ1 = lon * Math.PI / 180;
+
+            const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + 
+                      Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+            
+            const λ2 = λ1 + Math.atan2(Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+                      Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2));
+
+            return [
+                (λ2 * 180 / Math.PI + 540) % 360 - 180, // normalize longitude
+                φ2 * 180 / Math.PI
+            ];
+        }
+    </script>
+</body>
+</html>
