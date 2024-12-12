@@ -297,28 +297,41 @@
         // Start navigation mode
         function startNavigation() {
             if (!currentRoute) return;
-
-            // Display all route instructions
             displayRouteInstructions();
 
-            // Watch position for navigation updates
+            let prevLat = null, prevLon = null;
+            const headingHistory = [];
+            const MAX_HISTORY = 5;
+
             navigator.geolocation.watchPosition(
                 (position) => {
                     const lon = position.coords.longitude;
                     const lat = position.coords.latitude;
-                    const heading = position.coords.heading || 0;
+                    
+                    // Calculate heading from movement if possible
+                    let heading = 0;
+                    if (prevLat !== null && prevLon !== null) {
+                        heading = calculateHeading(prevLat, prevLon, lat, lon);
+                    }
+
+                    // Smooth heading
+                    headingHistory.push(heading);
+                    if (headingHistory.length > MAX_HISTORY) {
+                        headingHistory.shift();
+                    }
+                    const smoothedHeading = headingHistory.reduce((a, b) => a + b, 0) / headingHistory.length;
+
                     const userCoords = ol.proj.fromLonLat([lon, lat]);
-
-                    // Rotate map to match user's heading
-                    map.getView().setRotation(-heading * Math.PI / 180);
-
-                    // Center map on user's current location and zoom in
+                    map.getView().setRotation(-smoothedHeading * Math.PI / 180);
                     map.getView().setCenter(userCoords);
-                    map.getView().setZoom(16);  // Closer zoom level during navigation
+                    map.getView().setZoom(18);
+
+                    prevLat = lat;
+                    prevLon = lon;
                 },
                 (error) => {
                     displayError(`Navigation error: ${error.message}`);
-                    toggleNavigationMode(); // Exit navigation
+                    toggleNavigationMode();
                 },
                 {
                     enableHighAccuracy: true,
