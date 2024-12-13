@@ -85,7 +85,6 @@
         let navigationMode = false;
         let headingLockEnabled = true;
         let userPositionData = null;
-        let headingLockedRotationInteraction;
 
         // Error display function
         function displayError(message) {
@@ -205,67 +204,6 @@
             }
         });
 
-        function toggleHeadingLock() {
-            headingLockEnabled = !headingLockEnabled;
-            const headingLockSwitch = document.getElementById('heading-lock-switch');
-            headingLockSwitch.checked = headingLockEnabled;
-
-            // Update the heading-locked rotation interaction
-            if (headingLockedRotationInteraction) {
-                headingLockedRotationInteraction.setHeadingLockEnabled(headingLockEnabled);
-            }
-
-            if (!headingLockEnabled) {
-                // Reset map rotation to allow free rotation
-                map.getView().setRotation(0);
-            }
-}
-        
-        function createHeadingLockSwitch() {
-            const switchContainer = document.createElement('div');
-            switchContainer.style.position = 'absolute';
-            switchContainer.style.bottom = '20px';
-            switchContainer.style.right = '20px';
-            switchContainer.style.zIndex = '1000';
-            switchContainer.style.backgroundColor = 'white';
-            switchContainer.style.padding = '10px';
-            switchContainer.style.borderRadius = '5px';
-            switchContainer.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
-
-            const switchLabel = document.createElement('label');
-            switchLabel.innerHTML = 'Lock Heading ';
-            
-            const switchInput = document.createElement('input');
-            switchInput.type = 'checkbox';
-            switchInput.id = 'heading-lock-switch';
-            switchInput.checked = true;
-            switchInput.addEventListener('change', toggleHeadingLock);
-
-            switchLabel.appendChild(switchInput);
-            switchContainer.appendChild(switchLabel);
-            
-            map.getTargetElement().appendChild(switchContainer);
-        }
-
-        class HeadingLockedRotation extends ol.interaction.Interaction {
-            constructor(options = {}) {
-                super(options);
-                this.headingLockEnabled = true;
-            }
-
-            handleEvent(mapBrowserEvent) {
-                if (this.headingLockEnabled && mapBrowserEvent.type === 'rotate') {
-                    // Prevent rotation when heading lock is on
-                    return false;
-                }
-                return true;
-            }
-
-            setHeadingLockEnabled(enabled) {
-                this.headingLockEnabled = enabled;
-            }
-        }
-
         function haversineDistance(lat1, lon1, lat2, lon2) {
             const R = 6371e3; // Earth's radius in meters
             const φ1 = lat1 * Math.PI / 180;
@@ -367,84 +305,116 @@
         }
 
         const navigationBtn = document.getElementById('navigation-btn');
-        let prevLat = null, prevLon = null;
         let deviceHeading = null;
-        const headingHistory = [];
-        const MAX_HISTORY = 3; // Reduced from 5 to make it more responsive
-        const HEADING_UPDATE_INTERVAL = 100; // Milliseconds between heading calculations
 
-
-        // Disable map panning interactions
-        map.getInteractions().forEach(interaction => {
-            if (interaction instanceof ol.interaction.DragPan) {
-                interaction.setActive(false);
+        // More sophisticated heading smoothing
+        const headingBuffer = {
+            values: [],
+            MAX_BUFFER_SIZE: 5,
+            add: function(value) {
+                this.values.push(value);
+                if (this.values.length > this.MAX_BUFFER_SIZE) {
+                    this.values.shift();
+                }
+            },
+            getSmoothedValue: function() {
+                if (this.values.length === 0) return null;
+                
+                // Use median for more robust smoothing
+                const sorted = [...this.values].sort((a, b) => a - b);
+                const middle = Math.floor(sorted.length / 2);
+                return sorted.length % 2 !== 0 
+                    ? sorted[middle] 
+                    : (sorted[middle - 1] + sorted[middle]) / 2;
             }
-        });
+        };
 
-        // Create and add heading-locked rotation interaction
-        headingLockedRotationInteraction = new HeadingLockedRotation();
-        map.addInteraction(headingLockedRotationInteraction);
-
-        // Create heading lock switch
-        createHeadingLockSwitch();
-
-        // Device orientation event listener for absolute heading
-        window.addEventListener('deviceorientation', (event) => {
-            if (event.webkitCompassHeading) {
-                // For iOS devices
-                deviceHeading = event.webkitCompassHeading;
+        // More robust orientation event handling
+        const orientationHandler = (event) => {
+            let heading;
+            
+            // Prefer webkitCompassHeading for iOS, then absolute orientation
+            if (event.webkitCompassHeading !== undefined) {
+                heading = event.webkitCompassHeading;
             } else if (event.absolute && event.alpha !== null) {
-                // Convert alpha to compass heading (0-360 degrees)
-                deviceHeading = 360 - event.alpha;
+                heading = 360 - event.alpha;
             }
-        });
 
+            if (heading !== undefined) {
+                headingBuffer.add(heading);
+            }
+        };
+
+        // Remove previous event listeners to prevent duplicates
+        window.removeEventListener('deviceorientation', orientationHandler);
+        window.addEventListener('deviceorientation', orientationHandler, { passive: true });
+
+        // More controlled rotation management
+        const rotationControl = {
+            disabledInteractions: [],
+            disableRotation() {
+                // Disable all interactions that might cause rotation
+                const interactionsToDisable = [
+                    ol.interaction.DragRotate,
+                    ol.interaction.PinchRotate,
+                ];
+
+                // Capture and disable specific interactions
+                this.disabledInteractions = map.getInteractions().getArray().filter(interaction => {
+                    for (let InteractionType of interactionsToDisable) {
+                        if (interaction instanceof InteractionType) {
+                            interaction.setActive(false);
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                // Prevent map rotation via view
+                map.getView().setRotation(0);
+            },
+            restoreRotation() {
+                // Restore disabled interactions
+                this.disabledInteractions.forEach(interaction => {
+                    interaction.setActive(true);
+                });
+            }
+        };
+
+        // Disable rotation interactions immediately
+        rotationControl.disableRotation();
+
+        // Continuous position and heading update
         const watchOptions = {
             enableHighAccuracy: true,
             timeout: 10000,
             maximumAge: 0
         };
 
-        let headingUpdateTimer = setInterval(() => {
-            if (headingHistory.length > 0) {
-                const smoothedHeading = headingHistory.reduce((a, b) => a + b, 0) / headingHistory.length;
-
-                if (headingLockEnabled) {
-                    map.getView().setRotation(-smoothedHeading * Math.PI / 180);
-                }
-            }
-        }, HEADING_UPDATE_INTERVAL);
-
-        const watchCallback = (position) => {
+        const updateNavigation = (position) => {
             const lon = position.coords.longitude;
             const lat = position.coords.latitude;
-            
-            let heading = deviceHeading;
+            const userCoords = ol.proj.fromLonLat([lon, lat]);
 
-            // Fallback to movement-based heading if device orientation is not available
-            if (heading === null && prevLat !== null && prevLon !== null) {
-                heading = calculateHeading(prevLat, prevLon, lat, lon);
+            // Smoothed heading application
+            const smoothedHeading = headingBuffer.getSmoothedValue();
+            if (smoothedHeading !== null && headingLockEnabled) {
+                // More precise rotation setting
+                map.getView().setRotation(-smoothedHeading * Math.PI / 180);
             }
 
-            // Smooth heading
-            if (heading !== null) {
-                headingHistory.push(heading);
-                if (headingHistory.length > MAX_HISTORY) {
-                    headingHistory.shift();
-                }
-
-                const userCoords = ol.proj.fromLonLat([lon, lat]);
-                map.getView().setCenter(userCoords);
-            }
-
-            prevLat = lat;
-            prevLon = lon;
+            // Center map on user's location with specific zoom behavior
+            map.getView().animate({
+                center: userCoords,
+                duration: 500, // Smooth transition
+                zoom: map.getView().getZoom() // Maintain current zoom level
+            });
         };
 
         // Use the existing watchPositionId to track position
         navigator.geolocation.clearWatch(watchPositionId);
         watchPositionId = navigator.geolocation.watchPosition(
-            watchCallback,
+            updateNavigation,
             (error) => {
                 displayError(`Navigation error: ${error.message}`);
                 toggleNavigationMode();
@@ -453,56 +423,42 @@
         );
     }
 
-        function calculateHeading(lat1, lon1, lat2, lon2) {
-            const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
-            const x = Math.cos(lat1) * Math.sin(lat2) - 
-                    Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
-            return Math.atan2(y, x) * 180 / Math.PI;
-        }
-
-        function exitNavigation() {
-            // Remove heading-locked rotation interaction
-            if (headingLockedRotationInteraction) {
-                map.removeInteraction(headingLockedRotationInteraction);
-                headingLockedRotationInteraction = null;
-            }
-
-            // Reset map rotation
+    function exitNavigation() {
+        // Check if cleanup references exist
+        if (window.navigationCleanup) {
+            // Remove orientation listener
+            window.removeEventListener('deviceorientation', window.navigationCleanup.orientationHandler);
+            
+            // Restore rotation interactions
+            window.navigationCleanup.rotationControl.restoreRotation();
+            
+            // Reset map view
             map.getView().setRotation(0);
 
-            // Re-enable map panning interactions
-            map.getInteractions().forEach(interaction => {
-                if (interaction instanceof ol.interaction.DragPan) {
-                    interaction.setActive(true);
-                }
-            });
-
-            // Remove heading lock switch
-            const headingLockSwitch = document.getElementById('heading-lock-switch')?.parentElement;
-            if (headingLockSwitch) {
-                headingLockSwitch.remove();
-            }
-
-            // Clear route instructions
-            document.getElementById('route-instructions').innerHTML = '';
-
-            // Zoom back to full route
-            if (currentRoute) {
-                const routeFeature = new ol.Feature({
-                    geometry: new ol.geom.LineString(
-                        currentRoute.features[0].geometry.coordinates.map(
-                            coord => ol.proj.fromLonLat(coord)
-                        )
-                    )
-                });
-                const extent = routeFeature.getGeometry().getExtent();
-                map.getView().fit(extent, {
-                    padding: [50, 50, 50, 50],
-                    duration: 1000
-                });
-            }
+            // Clear the cleanup references
+            delete window.navigationCleanup;
         }
-        
+
+        // Clear route instructions
+        document.getElementById('route-instructions').innerHTML = '';
+
+        // Zoom back to full route
+        if (currentRoute) {
+            const routeFeature = new ol.Feature({
+                geometry: new ol.geom.LineString(
+                    currentRoute.features[0].geometry.coordinates.map(
+                        coord => ol.proj.fromLonLat(coord)
+                    )
+                )
+            });
+            const extent = routeFeature.getGeometry().getExtent();
+            map.getView().fit(extent, {
+                padding: [50, 50, 50, 50],
+                duration: 1000
+            });
+        }
+    }
+
         // Modify displayRouteInstructions to support both preview and navigation modes
         function displayRouteInstructions() {
             if (!currentRoute || !currentRoute.features[0]) return;
