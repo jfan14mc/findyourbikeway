@@ -85,6 +85,7 @@
         let navigationMode = false;
         let headingLockEnabled = true;
         let userPositionData = null;
+        let headingLockedRotationInteraction;
 
         // Error display function
         function displayError(message) {
@@ -299,165 +300,181 @@
 
         function startNavigation() {
         // Check if geolocation data is available
-        if (!userPositionData) {
-            displayError('Geolocation tracking must be started first');
-            return;
-        }
-
-        const navigationBtn = document.getElementById('navigation-btn');
-        let deviceHeading = null;
-
-        // More sophisticated heading smoothing
-        const headingBuffer = {
-            values: [],
-            MAX_BUFFER_SIZE: 5,
-            add: function(value) {
-                this.values.push(value);
-                if (this.values.length > this.MAX_BUFFER_SIZE) {
-                    this.values.shift();
-                }
-            },
-            getSmoothedValue: function() {
-                if (this.values.length === 0) return null;
-                
-                // Use median for more robust smoothing
-                const sorted = [...this.values].sort((a, b) => a - b);
-                const middle = Math.floor(sorted.length / 2);
-                return sorted.length % 2 !== 0 
-                    ? sorted[middle] 
-                    : (sorted[middle - 1] + sorted[middle]) / 2;
-            }
-        };
-
-        // More robust orientation event handling
-        const orientationHandler = (event) => {
-            let heading;
-            
-            // Prefer webkitCompassHeading for iOS, then absolute orientation
-            if (event.webkitCompassHeading !== undefined) {
-                heading = event.webkitCompassHeading;
-            } else if (event.absolute && event.alpha !== null) {
-                heading = 360 - event.alpha;
+            if (!userPositionData) {
+                displayError('Geolocation tracking must be started first');
+                return;
             }
 
-            if (heading !== undefined) {
-                headingBuffer.add(heading);
-            }
-        };
+            const navigationBtn = document.getElementById('navigation-btn');
 
-        // Remove previous event listeners to prevent duplicates
-        window.removeEventListener('deviceorientation', orientationHandler);
-        window.addEventListener('deviceorientation', orientationHandler, { passive: true });
-
-        // More controlled rotation management
-        const rotationControl = {
-            disabledInteractions: [],
-            disableRotation() {
-                // Disable all interactions that might cause rotation
-                const interactionsToDisable = [
-                    ol.interaction.DragRotate,
-                    ol.interaction.PinchRotate,
-                ];
-
-                // Capture and disable specific interactions
-                this.disabledInteractions = map.getInteractions().getArray().filter(interaction => {
-                    for (let InteractionType of interactionsToDisable) {
-                        if (interaction instanceof InteractionType) {
-                            interaction.setActive(false);
-                            return true;
-                        }
+            // Heading smoothing and tracking
+            const headingBuffer = {
+                values: [],
+                MAX_BUFFER_SIZE: 5,
+                add: function(value) {
+                    this.values.push(value);
+                    if (this.values.length > this.MAX_BUFFER_SIZE) {
+                        this.values.shift();
                     }
-                    return false;
+                },
+                getSmoothedValue: function() {
+                    if (this.values.length === 0) return null;
+                    
+                    // Use median for more robust smoothing
+                    const sorted = [...this.values].sort((a, b) => a - b);
+                    const middle = Math.floor(sorted.length / 2);
+                    return sorted.length % 2 !== 0 
+                        ? sorted[middle] 
+                        : (sorted[middle - 1] + sorted[middle]) / 2;
+                }
+            };
+
+            // More robust orientation event handling
+            const orientationHandler = (event) => {
+                let heading;
+                
+                // Prefer webkitCompassHeading for iOS, then absolute orientation
+                if (event.webkitCompassHeading !== undefined) {
+                    heading = event.webkitCompassHeading;
+                } else if (event.absolute && event.alpha !== null) {
+                    heading = 360 - event.alpha;
+                }
+
+                if (heading !== undefined) {
+                    headingBuffer.add(heading);
+                }
+            };
+
+            // Remove previous event listeners to prevent duplicates
+            window.removeEventListener('deviceorientation', orientationHandler);
+            window.addEventListener('deviceorientation', orientationHandler, { passive: true });
+
+            // Create center zoom interactions
+            const centerZoom = new ol.interaction.MouseWheelZoom({ useAnchor: false });
+            const centerPinchZoom = new ol.interaction.PinchZoom({ useAnchor: false });
+
+            // Disable default map interactions
+            const mapInteractions = map.getInteractions();
+            mapInteractions.forEach(interaction => {
+                // Disable panning, rotation, and default zoom interactions
+                if (interaction instanceof ol.interaction.DragPan || 
+                    interaction instanceof ol.interaction.DragRotate || 
+                    interaction instanceof ol.interaction.PinchRotate ||
+                    interaction instanceof ol.interaction.DragZoom ||
+                    interaction instanceof ol.interaction.MouseWheelZoom ||
+                    interaction instanceof ol.interaction.PinchZoom) {
+                    interaction.setActive(false);
+                }
+            });
+
+            map.addInteraction(centerZoom);
+            map.addInteraction(centerPinchZoom);
+
+            // Continuous position and heading update
+            const watchOptions = {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            };
+
+            const updateNavigation = (position) => {
+                const lon = position.coords.longitude;
+                const lat = position.coords.latitude;
+                const userCoords = ol.proj.fromLonLat([lon, lat]);
+
+                // Smoothed heading application
+                const smoothedHeading = headingBuffer.getSmoothedValue();
+                
+                // Always center and rotate map
+                map.getView().animate({
+                    center: userCoords,
+                    rotation: smoothedHeading !== null 
+                        ? -smoothedHeading * Math.PI / 180 
+                        : 0,
+                    duration: 300 // Smooth but responsive transition
                 });
 
-                // Prevent map rotation via view
-                map.getView().setRotation(0);
-            },
-            restoreRotation() {
-                // Restore disabled interactions
-                this.disabledInteractions.forEach(interaction => {
+                // Initial zoom to show route details
+                if (currentRoute) {
+                    const routeFeature = new ol.Feature({
+                        geometry: new ol.geom.LineString(
+                            currentRoute.features[0].geometry.coordinates.map(
+                                coord => ol.proj.fromLonLat(coord)
+                            )
+                        )
+                    });
+
+                    // Zoom in closer for navigation mode
+                    map.getView().setZoom(18); // More zoomed in view
+                }
+
+                // Refresh route instructions
+                displayRouteInstructions();
+            };
+
+            // Use the existing watchPositionId to track position
+            navigator.geolocation.clearWatch(watchPositionId);
+            watchPositionId = navigator.geolocation.watchPosition(
+                updateNavigation,
+                (error) => {
+                    displayError(`Navigation error: ${error.message}`);
+                    toggleNavigationMode();
+                },
+                watchOptions
+            );
+
+            // Prepare exit strategy
+            window.navigationCleanup = () => {
+                // Remove orientation listener
+                window.removeEventListener('deviceorientation', orientationHandler);
+                
+                // Restore map interactions
+                mapInteractions.forEach(interaction => {
+                    if (interaction instanceof ol.interaction.DragPan || 
+                    interaction instanceof ol.interaction.DragRotate || 
+                    interaction instanceof ol.interaction.PinchRotate ||
+                    interaction instanceof ol.interaction.DragZoom ||
+                    interaction instanceof ol.interaction.MouseWheelZoom ||
+                    interaction instanceof ol.interaction.PinchZoom) {
                     interaction.setActive(true);
+                    }
+                });
+
+                map.removeInteraction(centerZoom);
+                map.removeInteraction(centerPinchZoom);
+                
+                // Reset map view
+                map.getView().setRotation(0);
+                map.getView().setZoom(14); // Return to default zoom
+            };
+        }
+
+        function exitNavigation() {
+            // Call cleanup function if it exists
+            if (window.navigationCleanup) {
+                window.navigationCleanup();
+                window.navigationCleanup = null;
+            }
+
+            // Clear route instructions
+            document.getElementById('route-instructions').innerHTML = '';
+
+            // Zoom back to full route
+            if (currentRoute) {
+                const routeFeature = new ol.Feature({
+                    geometry: new ol.geom.LineString(
+                        currentRoute.features[0].geometry.coordinates.map(
+                            coord => ol.proj.fromLonLat(coord)
+                        )
+                    )
+                });
+                const extent = routeFeature.getGeometry().getExtent();
+                map.getView().fit(extent, {
+                    padding: [50, 50, 50, 50],
+                    duration: 1000
                 });
             }
-        };
-
-        // Disable rotation interactions immediately
-        rotationControl.disableRotation();
-
-        // Continuous position and heading update
-        const watchOptions = {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0
-        };
-
-        const updateNavigation = (position) => {
-            const lon = position.coords.longitude;
-            const lat = position.coords.latitude;
-            const userCoords = ol.proj.fromLonLat([lon, lat]);
-
-            // Smoothed heading application
-            const smoothedHeading = headingBuffer.getSmoothedValue();
-            if (smoothedHeading !== null && headingLockEnabled) {
-                // More precise rotation setting
-                map.getView().setRotation(-smoothedHeading * Math.PI / 180);
-            }
-
-            // Center map on user's location with specific zoom behavior
-            map.getView().animate({
-                center: userCoords,
-                duration: 500, // Smooth transition
-                zoom: map.getView().getZoom() // Maintain current zoom level
-            });
-        };
-
-        // Use the existing watchPositionId to track position
-        navigator.geolocation.clearWatch(watchPositionId);
-        watchPositionId = navigator.geolocation.watchPosition(
-            updateNavigation,
-            (error) => {
-                displayError(`Navigation error: ${error.message}`);
-                toggleNavigationMode();
-            },
-            watchOptions
-        );
-    }
-
-    function exitNavigation() {
-        // Check if cleanup references exist
-        if (window.navigationCleanup) {
-            // Remove orientation listener
-            window.removeEventListener('deviceorientation', window.navigationCleanup.orientationHandler);
-            
-            // Restore rotation interactions
-            window.navigationCleanup.rotationControl.restoreRotation();
-            
-            // Reset map view
-            map.getView().setRotation(0);
-
-            // Clear the cleanup references
-            delete window.navigationCleanup;
         }
-
-        // Clear route instructions
-        document.getElementById('route-instructions').innerHTML = '';
-
-        // Zoom back to full route
-        if (currentRoute) {
-            const routeFeature = new ol.Feature({
-                geometry: new ol.geom.LineString(
-                    currentRoute.features[0].geometry.coordinates.map(
-                        coord => ol.proj.fromLonLat(coord)
-                    )
-                )
-            });
-            const extent = routeFeature.getGeometry().getExtent();
-            map.getView().fit(extent, {
-                padding: [50, 50, 50, 50],
-                duration: 1000
-            });
-        }
-    }
 
         // Modify displayRouteInstructions to support both preview and navigation modes
         function displayRouteInstructions() {
