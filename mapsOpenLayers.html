@@ -53,6 +53,19 @@
             padding: 5px;
             background-color: #f0f0f0;
         }
+        #debug-info {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            z-index: 1000;
+            max-width: 300px;
+            word-wrap: break-word;
+        }
     </style>
 </head>
 <body>
@@ -95,6 +108,17 @@
         function clearErrors() {
             const errorDisplay = document.getElementById('error-display');
             errorDisplay.textContent = '';
+        }
+
+        function updateDebugInfo() {
+            const debugInfoElement = document.getElementById('debug-info');
+            debugInfoElement.innerHTML = `
+                <strong>Debug Information:</strong><br>
+                isIOS: ${isIOS}<br>
+                Current Heading: ${heading || 'N/A'}<br>
+                Navigation Mode: ${navigationMode}<br>
+                Watch Position ID: ${watchPositionId || 'Not Active'}
+            `;
         }
 
         // Initialize map
@@ -227,10 +251,12 @@
                 navigationBtn.textContent = '🧭 Exit Navigation';
                 startNavigation();
             }
-            
+            updateDebugInfo();
         }
+        
         function handler(event) {
             heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
+            updateDebugInfo();
         }
 
         function startNavigation() {
@@ -310,8 +336,6 @@
             } else {
                 window.addEventListener("deviceorientationabsolute", handler, true);
             }
-
-            heading = event.webkitCompassHeading || Math.abs(e.alpha - 360);
 
             // Continuous position and heading update
             const watchOptions = {
@@ -581,6 +605,7 @@
                 φ2 * 180 / Math.PI
             ];
         }
+        document.addEventListener('DOMContentLoaded', updateDebugInfo);
     </script>
 </body>
 </html>
