@@ -229,7 +229,9 @@
             }
             
         }
-
+        function handler(event) {
+            heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
+        }
 
         function startNavigation() {
             const navigationBtn = document.getElementById('navigation-btn');
@@ -255,27 +257,31 @@
             map.addInteraction(centerPinchZoom);
 
             watchPositionId = navigator.geolocation.watchPosition(
-                    (position) => {
-                        const lon = position.coords.longitude;
-                        const lat = position.coords.latitude;
-                        const userCoords = ol.proj.fromLonLat([lon, lat]);
+                (position) => {
+                    const lon = position.coords.longitude;
+                    const lat = position.coords.latitude;
+                    const userCoords = ol.proj.fromLonLat([lon, lat]);
 
-                        // Store position data for navigation mode
-                        userPositionData = {
-                            longitude: lon,
-                            latitude: lat,
-                            coords: userCoords
-                        };
+                    // Store position data for navigation mode
+                    userPositionData = {
+                        longitude: lon,
+                        latitude: lat,
+                        coords: userCoords
+                    };
 
-                        // Clear previous user marker
-                        userLocationSource.clear();
+                    // Clear previous user marker
+                    userLocationSource.clear();
 
-                        // Create and add user location marker
-                        const userMarker = new ol.Feature({
-                            geometry: new ol.geom.Point(userCoords)
-                        });
-                        userLocationSource.addFeature(userMarker);
-                    },
+                    // Create and add user location marker
+                    const userMarker = new ol.Feature({
+                        geometry: new ol.geom.Point(userCoords)
+                    });
+                    userLocationSource.addFeature(userMarker);
+
+                    map.getView().animate({
+                        center: userCoords,
+                        duration: 500
+                    }),
                     (error) => {
                         displayError(`Geolocation error: ${error.message}`);
                         geolocationBtn.disabled = false;
@@ -288,7 +294,8 @@
                         timeout: 10000,
                         maximumAge: 0
                     }
-                );
+                }
+            );  
 
             if (isIOS) {
                 DeviceOrientationEvent.requestPermission()
@@ -353,41 +360,44 @@
                 },
                 watchOptions
             );
+        }
+ 
+        function exitNavigation() {
+            // Clear active watchers and position tracking
+            if (watchPositionId) {
+                navigator.geolocation.clearWatch(watchPositionId);
+                watchPositionId = null;
+            }
 
-            // Prepare exit strategy
-            window.navigationCleanup = () => {                
-                // Restore map interactions
-                mapInteractions.forEach(interaction => {
-                    if (interaction instanceof ol.interaction.DragPan || 
+            // Remove orientation event listeners
+            window.removeEventListener("deviceorientation", handler, true);
+            window.removeEventListener("deviceorientationabsolute", handler, true);
+
+            // Restore all map interactions
+            const mapInteractions = map.getInteractions();
+            mapInteractions.forEach(interaction => {
+                // Re-enable standard map interactions
+                if (interaction instanceof ol.interaction.DragPan || 
                     interaction instanceof ol.interaction.DragRotate || 
                     interaction instanceof ol.interaction.PinchRotate ||
                     interaction instanceof ol.interaction.DragZoom ||
                     interaction instanceof ol.interaction.MouseWheelZoom ||
                     interaction instanceof ol.interaction.PinchZoom) {
                     interaction.setActive(true);
-                    }
-                });
+                }
+            });
 
-                map.removeInteraction(centerZoom);
-                map.removeInteraction(centerPinchZoom);
-                
-                // Reset map view
-                map.getView().setRotation(0);
-                map.getView().setZoom(14); // Return to default zoom
-            };
-        }
- 
-        function exitNavigation() {
-            // Call cleanup function if it exists
-            if (window.navigationCleanup) {
-                window.navigationCleanup();
-                window.navigationCleanup = null;
-            }
+            // Reset map view to original state
+            map.getView().setRotation(0);
+            map.getView().setZoom(14);
+
+            // Clear user location marker
+            userLocationSource.clear();
 
             // Clear route instructions
             document.getElementById('route-instructions').innerHTML = '';
 
-            // Zoom back to full route
+            // Zoom back to full route if exists
             if (currentRoute) {
                 const routeFeature = new ol.Feature({
                     geometry: new ol.geom.LineString(
@@ -402,6 +412,10 @@
                     duration: 1000
                 });
             }
+
+            // Reset navigation mode button
+            const navigationBtn = document.getElementById('navigation-btn');
+            navigationBtn.textContent = '🧭 Navigation';
         }
 
         // Modify displayRouteInstructions to support both preview and navigation modes
