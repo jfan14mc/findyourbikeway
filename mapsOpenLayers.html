@@ -85,7 +85,11 @@
         let navigationMode = false;
         let headingLockEnabled = true;
         let userPositionData = null;
-        let headingLockedRotationInteraction;
+
+        const isIOS = !(
+            navigator.userAgent.match(/(iPod|iPhone|iPad)/) &&
+            navigator.userAgent.match(/AppleWebKit/)
+        );
 
         // Error display function
         function displayError(message) {
@@ -278,7 +282,6 @@
             }
         }
 
-        // Updated toggle navigation mode
         function toggleNavigationMode() {
             const navigationBtn = document.getElementById('navigation-btn');
             
@@ -299,64 +302,13 @@
         }
 
         function startNavigation() {
-        // Check if geolocation data is available
-            if (!userPositionData) {
-                displayError('Geolocation tracking must be started first');
-                return;
-            }
-
-            const navigationBtn = document.getElementById('navigation-btn');
-
-            // Heading smoothing and tracking
-            const headingBuffer = {
-                values: [],
-                MAX_BUFFER_SIZE: 5,
-                add: function(value) {
-                    this.values.push(value);
-                    if (this.values.length > this.MAX_BUFFER_SIZE) {
-                        this.values.shift();
-                    }
-                },
-                getSmoothedValue: function() {
-                    if (this.values.length === 0) return null;
-                    
-                    // Use median for more robust smoothing
-                    const sorted = [...this.values].sort((a, b) => a - b);
-                    const middle = Math.floor(sorted.length / 2);
-                    return sorted.length % 2 !== 0 
-                        ? sorted[middle] 
-                        : (sorted[middle - 1] + sorted[middle]) / 2;
-                }
-            };
-
-            // More robust orientation event handling
-            const orientationHandler = (event) => {
-                let heading;
-                
-                // Prefer webkitCompassHeading for iOS, then absolute orientation
-                if (event.webkitCompassHeading !== undefined) {
-                    heading = event.webkitCompassHeading;
-                } else if (event.absolute && event.alpha !== null) {
-                    heading = 360 - event.alpha;
-                }
-
-                if (heading !== undefined) {
-                    headingBuffer.add(heading);
-                }
-            };
-
-            // Remove previous event listeners to prevent duplicates
-            window.removeEventListener('deviceorientation', orientationHandler);
-            window.addEventListener('deviceorientation', orientationHandler, { passive: true });
-
             // Create center zoom interactions
             const centerZoom = new ol.interaction.MouseWheelZoom({ useAnchor: false });
             const centerPinchZoom = new ol.interaction.PinchZoom({ useAnchor: false });
 
-            // Disable default map interactions
+            // Disable panning, rotation, and default zoom interactions
             const mapInteractions = map.getInteractions();
             mapInteractions.forEach(interaction => {
-                // Disable panning, rotation, and default zoom interactions
                 if (interaction instanceof ol.interaction.DragPan || 
                     interaction instanceof ol.interaction.DragRotate || 
                     interaction instanceof ol.interaction.PinchRotate ||
@@ -370,6 +322,22 @@
             map.addInteraction(centerZoom);
             map.addInteraction(centerPinchZoom);
 
+            if (isIOS) {
+                DeviceOrientationEvent.requestPermission()
+                .then((response) => {
+                    if (response === "granted") {
+                    window.addEventListener("deviceorientation", handler, true);
+                    } else {
+                    alert("Permission needs to be granted for navigation!");
+                    }
+                })
+                .catch(() => alert("not supported"));
+            } else {
+                window.addEventListener("deviceorientationabsolute", handler, true);
+            }
+
+            heading = event.webkitCompassHeading || Math.abs(e.alpha - 360);
+
             // Continuous position and heading update
             const watchOptions = {
                 enableHighAccuracy: true,
@@ -382,15 +350,10 @@
                 const lat = position.coords.latitude;
                 const userCoords = ol.proj.fromLonLat([lon, lat]);
 
-                // Smoothed heading application
-                const smoothedHeading = headingBuffer.getSmoothedValue();
-                
                 // Always center and rotate map
                 map.getView().animate({
                     center: userCoords,
-                    rotation: smoothedHeading !== null 
-                        ? -smoothedHeading * Math.PI / 180 
-                        : 0,
+                    rotation: heading,
                     duration: 300 // Smooth but responsive transition
                 });
 
@@ -424,10 +387,7 @@
             );
 
             // Prepare exit strategy
-            window.navigationCleanup = () => {
-                // Remove orientation listener
-                window.removeEventListener('deviceorientation', orientationHandler);
-                
+            window.navigationCleanup = () => {                
                 // Restore map interactions
                 mapInteractions.forEach(interaction => {
                     if (interaction instanceof ol.interaction.DragPan || 
