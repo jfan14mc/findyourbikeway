@@ -121,7 +121,7 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V10:</strong><br>
+                    <strong>Debug Information V11:</strong><br>
                     isIOS: ${isIOS}<br>
                     Current Location: ${latitude ? latitude.toFixed(6) : 'N/A'}, ${longitude ? longitude.toFixed(6) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
@@ -436,7 +436,7 @@
             longitude = lon
             latitude = lat
             heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
-            radHeading = heading * (Math.PI / 180);
+            radHeading = -1 * heading * (Math.PI / 180);
             userCoords = uC;
             
             map.getView().animate({
