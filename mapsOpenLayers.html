@@ -90,9 +90,10 @@
 
         // Global variables for tracking
         let currentRoute = null;
-        let watchPositionId = null;
+        let getPositionId = null;
         let navigationMode = false;
         let heading = null
+        let radHeading = null
         let latitude = null
         let longitude = null
         let userCoords = null
@@ -348,9 +349,9 @@
  
         function exitNavigation() {
             // Clear active watchers and position tracking
-            if (watchPositionId) {
-                navigator.geolocation.clearWatch(watchPositionId);
-                watchPositionId = null;
+            if (getPositionId) {
+                navigator.geolocation.clearWatch(getPositionId);
+                getPositionId = null;
             }
 
             // Remove orientation event listeners
@@ -404,7 +405,7 @@
         }
 
         function handler(event) {
-            watchPositionId = navigator.geolocation.getCurrentPosition(
+            getPositionId = navigator.geolocation.getCurrentPosition(
                 (position) => {
                     lon = position.coords.longitude;
                     lat = position.coords.latitude;
@@ -420,29 +421,70 @@
                     }
                 }
             )
-            
+
             longitude = lon
             latitude = lat
             heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
-            userCoords = uC
+            radHeading = heading * (Math.PI / 180);
+            userCoords = uC;
             
-
             map.getView().animate({
-                    center: userCoords,
-                    rotation: heading,
-                    duration: 200
-                });
+                center: userCoords,
+                rotation: radHeading,
+                duration: 150,
+            });
 
-                // Clear previous user marker
-                userLocationSource.clear();
+            // Clear previous user marker
+            userLocationSource.clear();
 
-                // Create and add user location marker
-                const userMarker = new ol.Feature({
-                    geometry: new ol.geom.Point(userCoords)
-                });
-                userLocationSource.addFeature(userMarker);
+            // Create and add user location marker
+            const userMarker = new ol.Feature({
+                geometry: new ol.geom.Point(userCoords)
+            });
+            userLocationSource.addFeature(userMarker);
             updateDebugInfo();
         }
+
+        // function navigationView() {
+        //     getPositionId = navigator.geolocation.getCurrentPosition(
+        //         (position) => {
+        //             lon = position.coords.longitude;
+        //             lat = position.coords.latitude;
+        //             uC = ol.proj.fromLonLat([lon, lat]);
+        //             (error) => {
+        //                 displayError(`Geolocation error: ${error.message}`);
+        //                 toggleNavigationMode()
+        //             },
+        //             {
+        //                 enableHighAccuracy: true,
+        //                 timeout: 5000,
+        //                 maximumAge: 0
+        //             }
+        //         }
+        //     )
+            
+        //     longitude = lon
+        //     latitude = lat
+        //     heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
+        //     userCoords = uC
+            
+
+        //     map.getView().animate({
+        //             center: userCoords,
+        //             rotation: heading * pi / 180,
+        //             duration: 200
+        //         });
+
+        //                     // Clear previous user marker
+        //                     userLocationSource.clear();
+
+        //     // Create and add user location marker
+        //     const userMarker = new ol.Feature({
+        //         geometry: new ol.geom.Point(userCoords)
+        //     });
+        //     userLocationSource.addFeature(userMarker);
+        //     updateDebugInfo();
+        // }
 
         // Modify displayRouteInstructions to support both preview and navigation modes
         function displayRouteInstructions() {
