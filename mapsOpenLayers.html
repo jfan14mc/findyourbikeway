@@ -35,17 +35,13 @@
             padding: 10px;
             background-color: #ffeeee;
         }
-        #geolocation-btn, #navigation-btn {
+        #navigation-btn {
             margin-left: 10px;
             padding: 5px 10px;
             background-color: #4CAF50;
             color: white;
             border: none;
             cursor: pointer;
-        }
-        #geolocation-btn:disabled, #navigation-btn:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
         }
         #route-instructions {
             background-color: #f9f9f9;
@@ -64,8 +60,7 @@
         <input type="text" id="start-input" placeholder="Start Location" value="8300 Baltimore Ave">
         <input type="text" id="end-input" placeholder="Destination" value="Bladensburg Waterfront Park">
         <button onclick="calculateRoute()">Find Route</button>
-        <button id="geolocation-btn" onclick="startContinuousTracking()">📍 Track Location</button>
-        <button id="navigation-btn" onclick="toggleNavigationMode()" disabled>🧭 Navigation</button>
+        <button id="navigation-btn" onclick="toggleNavigationMode()">🧭 Navigation</button>
     </div>
     <div id="avoidance-areas">
         <p>Ctrl-click to create avoidance areas (first click sets center, second sets radius)</p>
@@ -83,8 +78,6 @@
         let currentRoute = null;
         let watchPositionId = null;
         let navigationMode = false;
-        let headingLockEnabled = true;
-        let userPositionData = null;
 
         const isIOS = (
             navigator.userAgent.match(/(iPod|iPhone|iPad)/) &&
@@ -224,22 +217,44 @@
             return R * c;
         }
 
-        function startContinuousTracking() {
-            const geolocationBtn = document.getElementById('geolocation-btn');
+        function toggleNavigationMode() {
             const navigationBtn = document.getElementById('navigation-btn');
-            
-            // Clear previous tracking and user location
-            if (watchPositionId) {
-                navigator.geolocation.clearWatch(watchPositionId);
+            navigationMode = !navigationMode;
+            if (!navigationMode) {
+                navigationBtn.textContent = '🧭 Navigation';
+                exitNavigation();
+            } else {
+                navigationBtn.textContent = '🧭 Exit Navigation';
+                startNavigation();
             }
-            userLocationSource.clear();
+            
+        }
 
-            if ("geolocation" in navigator) {
-                geolocationBtn.disabled = true;
-                navigationBtn.disabled = false;
-                geolocationBtn.textContent = '📍 Tracking...';
 
-                watchPositionId = navigator.geolocation.watchPosition(
+        function startNavigation() {
+            const navigationBtn = document.getElementById('navigation-btn');
+
+            // Create center zoom interactions
+            const centerZoom = new ol.interaction.MouseWheelZoom({ useAnchor: false });
+            const centerPinchZoom = new ol.interaction.PinchZoom({ useAnchor: false });
+
+            // Disable panning, rotation, and default zoom interactions
+            const mapInteractions = map.getInteractions();
+            mapInteractions.forEach(interaction => {
+                if (interaction instanceof ol.interaction.DragPan || 
+                    interaction instanceof ol.interaction.DragRotate || 
+                    interaction instanceof ol.interaction.PinchRotate ||
+                    interaction instanceof ol.interaction.DragZoom ||
+                    interaction instanceof ol.interaction.MouseWheelZoom ||
+                    interaction instanceof ol.interaction.PinchZoom) {
+                    interaction.setActive(false);
+                }
+            });
+
+            map.addInteraction(centerZoom);
+            map.addInteraction(centerPinchZoom);
+
+            watchPositionId = navigator.geolocation.watchPosition(
                     (position) => {
                         const lon = position.coords.longitude;
                         const lat = position.coords.latitude;
@@ -274,55 +289,6 @@
                         maximumAge: 0
                     }
                 );
-
-                geolocationBtn.textContent = '📍 Stop Tracking';
-                geolocationBtn.disabled = false;
-            } else {
-                displayError('Geolocation is not supported by your browser');
-            }
-        }
-
-        function toggleNavigationMode() {
-            const navigationBtn = document.getElementById('navigation-btn');
-            
-            // Check if geolocation data is available
-            if (!userPositionData && !navigationMode) {
-                displayError('Please start location tracking first');
-                return;
-            }
-
-            if (navigationMode) {
-                navigationBtn.textContent = '🧭 Navigation';
-                exitNavigation();
-            } else {
-                navigationBtn.textContent = '🧭 Exit Navigation';
-                startNavigation();
-            }
-            navigationMode = !navigationMode;
-        }
-
-        function startNavigation() {
-            const navigationBtn = document.getElementById('navigation-btn');
-
-            // Create center zoom interactions
-            const centerZoom = new ol.interaction.MouseWheelZoom({ useAnchor: false });
-            const centerPinchZoom = new ol.interaction.PinchZoom({ useAnchor: false });
-
-            // Disable panning, rotation, and default zoom interactions
-            const mapInteractions = map.getInteractions();
-            mapInteractions.forEach(interaction => {
-                if (interaction instanceof ol.interaction.DragPan || 
-                    interaction instanceof ol.interaction.DragRotate || 
-                    interaction instanceof ol.interaction.PinchRotate ||
-                    interaction instanceof ol.interaction.DragZoom ||
-                    interaction instanceof ol.interaction.MouseWheelZoom ||
-                    interaction instanceof ol.interaction.PinchZoom) {
-                    interaction.setActive(false);
-                }
-            });
-
-            map.addInteraction(centerZoom);
-            map.addInteraction(centerPinchZoom);
 
             if (isIOS) {
                 DeviceOrientationEvent.requestPermission()
