@@ -397,9 +397,9 @@
             }
 
             // Remove orientation event listeners
-            window.removeEventListener("deviceorientation", handler, true);
-            window.removeEventListener("deviceorientationabsolute", handler, true);
-            window.removeEventListener("devicemotion", handler, true);
+            window.removeEventListener("deviceorientation", rotationHandler, true);
+            window.removeEventListener("deviceorientationabsolute", rotationHandler, true);
+            window.removeEventListener("devicemotion", motionHandler, true);
 
             // Restore all map interactions
             const mapInteractions = map.getInteractions();
@@ -457,42 +457,46 @@
             updateDebugInfo();
         }
 
+        let userLocationFeature = null;
+
         function motionHandler(event) {
-            getPositionId = navigator.geolocation.getCurrentPosition(
+            navigator.geolocation.getCurrentPosition(
                 (position) => {
-                    lon = position.coords.longitude;
-                    lat = position.coords.latitude;
-                    uC = ol.proj.fromLonLat([lon, lat]);
-                    (error) => {
-                        displayError(`Geolocation error: ${error.message}`);
-                        toggleNavigationMode()
-                    },
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 5000,
-                        maximumAge: 0
+                    const lon = position.coords.longitude;
+                    const lat = position.coords.latitude;
+                    const uC = ol.proj.fromLonLat([lon, lat]);
+                    
+                    // Only update if coordinates have meaningfully changed
+                    if (!userLocationFeature) {
+                        userLocationFeature = new ol.Feature({
+                            geometry: new ol.geom.Point(uC)
+                        });
+                        userLocationSource.addFeature(userLocationFeature);
+                    } else {
+                        userLocationFeature.setGeometry(new ol.geom.Point(uC));
                     }
+                    
+                    longitude = lon;
+                    latitude = lat;
+                    userCoords = uC;
+                
+                    map.getView().animate({
+                        center: userCoords,
+                        duration: 150,
+                    });
+                    
+                    updateDebugInfo();
+                },
+                (error) => {
+                    displayError(`Geolocation error: ${error.message}`);
+                    toggleNavigationMode();
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 1000,  // Reduced timeout
+                    maximumAge: 0
                 }
-            )
-
-            longitude = lon
-            latitude = lat
-            userCoords = uC;
-            
-            map.getView().animate({
-                center: userCoords,
-                duration: 150,
-            });
-
-            // Clear previous user marker
-            userLocationSource.clear();
-
-            // Create and add user location marker
-            const userMarker = new ol.Feature({
-                geometry: new ol.geom.Point(userCoords)
-            });
-            userLocationSource.addFeature(userMarker);
-            updateDebugInfo();
+            );
         }
 
         // Modify displayRouteInstructions to support both preview and navigation modes
