@@ -121,7 +121,7 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V11:</strong><br>
+                    <strong>Debug Information V13:</strong><br>
                     isIOS: ${isIOS}<br>
                     Current Location: ${latitude ? latitude.toFixed(6) : 'N/A'}, ${longitude ? longitude.toFixed(6) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
@@ -415,7 +415,7 @@
             navigationBtn.textContent = '🧭 Navigation';
         }
 
-        function handlerRotation(event) {
+        function rotationHandler(event) {
             heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
             radHeading = -1 * heading * (Math.PI / 180);
             userCoords = uC;
@@ -427,7 +427,7 @@
             updateDebugInfo();
         }
 
-        function handlerMotion(event) {
+        function motionHandler(event) {
             getPositionId = navigator.geolocation.getCurrentPosition(
                 (position) => {
                     lon = position.coords.longitude;
