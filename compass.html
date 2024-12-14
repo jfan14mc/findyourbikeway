@@ -80,34 +80,27 @@
 
     function init() {
       startBtn.addEventListener("click", startCompass);
-      navigator.geolocation.getCurrentPosition(locationHandler);
-
-      if (!isIOS) {
-        window.addEventListener("deviceorientationabsolute", handler, true);
-      }
     }
 
     function startCompass() {
-      if (isIOS) {
-        DeviceOrientationEvent.requestPermission()
-          .then((response) => {
-            if (response === "granted") {
-              window.addEventListener("deviceorientation", handler, true);
-            } else {
-              alert("has to be allowed!");
-            }
-          })
-          .catch(() => alert("not supported"));
-      }
+        if (isIOS) {
+            DeviceOrientationEvent.requestPermission()
+            .then((response) => {
+                if (response === "granted") {
+                window.addEventListener("deviceorientation", handler, true);
+                } else {
+                alert("has to be allowed!");
+                }
+            })
+            .catch(() => alert("not supported"));
+        } else {
+            window.addEventListener("deviceorientationabsolute", handler, true);
+        }
     }
 
     function handler(e) {
       compass = e.webkitCompassHeading || Math.abs(e.alpha - 360);
       compassCircle.style.transform = `translate(-50%, -50%) rotate(${-compass}deg)`;
-    }
-
-    function locationHandler(position) {
-      const { latitude, longitude } = position.coords;
     }
 
     init();
