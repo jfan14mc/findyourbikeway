@@ -11,11 +11,7 @@
             padding: 0; 
             height: 100%; 
             font-family: Arial, sans-serif; 
-            touch-action: manipulation; /* Prevent double-tap zoom */
-        }
-        #map { 
-            width: 100%; 
-            height: calc(100vh - 300px); 
+            touch-action: manipulation;
         }
         #routing-container {
             display: flex;
@@ -23,6 +19,23 @@
             padding: 15px;
             background-color: #f0f0f0;
             gap: 10px;
+            transition: transform 0.3s ease;
+            position: relative;
+            z-index: 10;
+        }
+        #routing-container.hidden {
+            transform: translateY(-100%);
+        }
+        #input-button-container {
+            display: flex;
+            gap: 10px;
+            align-items: stretch; /* Ensure equal height */
+        }
+        #input-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            flex-grow: 1;
         }
         #routing-container input {
             width: 100%;
@@ -30,40 +43,60 @@
             font-size: 16px;
             border: 1px solid #ccc;
             border-radius: 5px;
+            box-sizing: border-box;
         }
-        #button-container {
-            display: flex;
-            gap: 10px;
-        }
-        #navigation-btn, #route-btn {
-            flex-grow: 1;
+        #route-btn {
+            width: 15%;
             padding: 12px;
             font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
             border: none;
             border-radius: 5px;
             cursor: pointer;
             transition: background-color 0.3s;
-        }
-        #route-btn {
-            background-color: #4CAF50;
-            color: white;
+            align-self: stretch;
         }
         #navigation-btn {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
             background-color: #2196F3;
             color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            position: relative;
+            left: 0;
+            transition: transform 0.3s ease; 
         }
-        #avoidance-areas {
-            margin-top: 10px;
-            padding: 10px;
-            background-color: #e0e0e0;
-            text-align: center;
-            font-size: 14px;
+        #navigation-btn.navigation-active {
+            transform: translateY(-280%);
         }
+        #map { 
+            width: 100%; 
+            height: calc(100vh - 200px);
+            transition: transform 0.3s ease;
+        }
+
+        #map.navigation-active {
+            transform: translateY(-125px);
+        }
+
         #error-display {
+            position: relative;
             color: red;
             padding: 10px;
             background-color: #ffeeee;
             text-align: center;
+            display: none;
+        }
+        #error-close {
+            position: absolute;
+            top: 5px;
+            right: 10px;
+            cursor: pointer;
+            font-weight: bold;
         }
         #route-instructions {
             background-color: #f9f9f9;
@@ -98,21 +131,24 @@
     </style>
 </head>
 <body>
+    <div id="error-display">
+        <span id="error-message"></span>
+        <span id="error-close">✕</span>
+    </div>
     <div id="routing-container">
-        <input type="text" id="start-input" placeholder="Start Location" value="8300 Baltimore Ave">
-        <input type="text" id="end-input" placeholder="Destination" value="Bladensburg Waterfront Park">
-        <div id="button-container">
+        <div id="input-button-container">
+            <div id="input-container">
+                <input type="text" id="start-input" placeholder="Start Location" value="8300 Baltimore Ave">
+                <input type="text" id="end-input" placeholder="Destination" value="Bladensburg Waterfront Park">
+            </div>
             <button id="route-btn" onclick="calculateRoute()">Find Route</button>
-            <button id="navigation-btn" onclick="toggleNavigationMode()">🧭 Navigation</button>
         </div>
     </div>
-    <div id="avoidance-areas">
-        Tap and hold twice to create avoidance areas
-    </div>
-    <div id="error-display"></div>
+    <button id="navigation-btn" onclick="toggleNavigationMode()">🧭 Navigation</button>
     <div id="map"></div>
     <div id="debug-info"></div>
     <div id="route-instructions"></div>
+
 
     <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
     <script>
@@ -137,14 +173,21 @@
         // Error display function
         function displayError(message) {
             const errorDisplay = document.getElementById('error-display');
-            errorDisplay.textContent = message;
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.textContent = message;
+            errorDisplay.style.display = 'block';
             console.error(message);
         }
+
+        document.getElementById('error-close').addEventListener('click', () => {
+            const errorDisplay = document.getElementById('error-display');
+            errorDisplay.style.display = 'none';
+        });
 
         // Clear previous errors
         function clearErrors() {
             const errorDisplay = document.getElementById('error-display');
-            errorDisplay.textContent = '';
+            errorDisplay.style.display = 'none';
         }
 
         function updateDebugInfo(lon, lat) {
@@ -152,7 +195,7 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V15:</strong><br>
+                    <strong>Debug Information V18:</strong><br>
                     isIOS: ${isIOS}<br>
                     Current Location: ${latitude ? latitude.toFixed(7) : 'N/A'}, ${longitude ? longitude.toFixed(7) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
@@ -322,14 +365,40 @@
 
         function toggleNavigationMode() {
             const navigationBtn = document.getElementById('navigation-btn');
+            const routingContainer = document.getElementById('routing-container');
+            const mapElement = document.getElementById('map');
+
             navigationMode = !navigationMode;
             if (!navigationMode) {
                 navigationBtn.textContent = '🧭 Navigation';
+                navigationBtn.classList.remove('navigation-active'); 
+
+                // Slide routing container back down
+                routingContainer.classList.remove('hidden');
+
+                
+                // Restore map height to default
+                mapElement.style.height = 'calc(100vh - 300px)';
+                mapElement.classList.remove('navigation-active')
+
+                
                 exitNavigation();
             } else {
                 navigationBtn.textContent = '🧭 Exit Navigation';
+                navigationBtn.classList.add('navigation-active'); 
+                
+                // Slide routing container up
+                routingContainer.classList.add('hidden');
+                
+                // Adjust map height to full viewport
+                mapElement.style.height = 'calc(100vh - 100px)';
+                mapElement.classList.add('navigation-active')
+                
                 startNavigation();
             }
+            
+            // Trigger map resize to ensure proper rendering
+            map.updateSize();
             updateDebugInfo();
         }
         
@@ -416,8 +485,11 @@
             });
 
             // Reset map view to original state
-            map.getView().setRotation(0);
-            map.getView().setZoom(14);
+            map.getView().animate({
+                rotation: 0,
+                zoom: 14,
+                duration: 500
+            })
 
             // Clear user location marker
             userLocationSource.clear();
@@ -437,7 +509,8 @@
                 const extent = routeFeature.getGeometry().getExtent();
                 map.getView().fit(extent, {
                     padding: [50, 50, 50, 50],
-                    duration: 1000
+                    duration: 500,
+                    easing: ol.easing.easeOut
                 });
             }
 
@@ -452,7 +525,7 @@
             
             map.getView().animate({
                 rotation: radHeading,
-                duration: 150,
+                duration: 100,
             });
             updateDebugInfo();
         }
@@ -482,7 +555,7 @@
                 
                     map.getView().animate({
                         center: userCoords,
-                        duration: 150,
+                        duration: 100,
                     });
                     
                     updateDebugInfo();
@@ -662,8 +735,7 @@
                 φ2 * 180 / Math.PI
             ];
         }
-        
-        document.addEventListener('DOMContentLoaded', updateDebugInfo);
+
     </script>
 </body>
 </html>
