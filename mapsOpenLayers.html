@@ -92,6 +92,9 @@
         let currentRoute = null;
         let watchPositionId = null;
         let navigationMode = false;
+        let heading = null
+        let latitude = null
+        let longitude = null
 
         const isIOS = (
             navigator.userAgent.match(/(iPod|iPhone|iPad)/) &&
@@ -111,15 +114,18 @@
             errorDisplay.textContent = '';
         }
 
-        function updateDebugInfo() {
+        function updateDebugInfo(lon, lat) {
             const debugInfoElement = document.getElementById('debug-info');
-            debugInfoElement.innerHTML = `
-                <strong>Debug Information:</strong><br>
-                isIOS: ${isIOS}<br>
-                Current Heading: ${heading || 'N/A'}<br>
-                Navigation Mode: ${navigationMode}<br>
-                Watch Position ID: ${watchPositionId || 'Not Active'}
-            `;
+            
+            if (debugInfoElement) {
+                debugInfoElement.innerHTML = `
+                    <strong>Debug Information:</strong><br>
+                    isIOS: ${isIOS}<br>
+                    Current Location: ${latitude ? latitude.toFixed(6) : 'N/A'}, ${longitude ? longitude.toFixed(6) : 'N/A'}<br>
+                    Current Heading: ${heading || 'N/A'}<br>
+                    Navigation Mode: ${navigationMode}<br>
+                `;
+            }
         }
 
         // Initialize map
@@ -255,10 +261,6 @@
             updateDebugInfo();
         }
         
-        function handler(event) {
-            heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
-            updateDebugInfo();
-        }
 
         function startNavigation() {
             const navigationBtn = document.getElementById('navigation-btn');
@@ -283,47 +285,6 @@
             map.addInteraction(centerZoom);
             map.addInteraction(centerPinchZoom);
 
-            watchPositionId = navigator.geolocation.watchPosition(
-                (position) => {
-                    const lon = position.coords.longitude;
-                    const lat = position.coords.latitude;
-                    const userCoords = ol.proj.fromLonLat([lon, lat]);
-
-                    // Store position data for navigation mode
-                    userPositionData = {
-                        longitude: lon,
-                        latitude: lat,
-                        coords: userCoords
-                    };
-
-                    // Clear previous user marker
-                    userLocationSource.clear();
-
-                    // Create and add user location marker
-                    const userMarker = new ol.Feature({
-                        geometry: new ol.geom.Point(userCoords)
-                    });
-                    userLocationSource.addFeature(userMarker);
-
-                    map.getView().animate({
-                        center: userCoords,
-                        duration: 500
-                    }),
-                    (error) => {
-                        displayError(`Geolocation error: ${error.message}`);
-                        geolocationBtn.disabled = false;
-                        geolocationBtn.textContent = '📍 Track Location';
-                        navigationBtn.disabled = true;
-                        userPositionData = null;
-                    },
-                    {
-                        enableHighAccuracy: true,
-                        timeout: 10000,
-                        maximumAge: 0
-                    }
-                }
-            );  
-
             if (isIOS) {
                 DeviceOrientationEvent.requestPermission()
                 .then((response) => {
@@ -337,54 +298,15 @@
             } else {
                 window.addEventListener("deviceorientationabsolute", handler, true);
             }
+            window.addEventListener("devicemotion", handler, true);
 
-            // Continuous position and heading update
-            const watchOptions = {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-            };
-
-            const updateNavigation = (position) => {
-                const lon = position.coords.longitude;
-                const lat = position.coords.latitude;
-                const userCoords = ol.proj.fromLonLat([lon, lat]);
-
-                // Always center and rotate map
-                map.getView().animate({
-                    center: userCoords,
-                    rotation: heading,
-                    duration: 300 // Smooth but responsive transition
+            map.getView().animate({
+                    zoom: 16,
+                    duration: 200
                 });
 
-                // Initial zoom to show route details
-                if (currentRoute) {
-                    const routeFeature = new ol.Feature({
-                        geometry: new ol.geom.LineString(
-                            currentRoute.features[0].geometry.coordinates.map(
-                                coord => ol.proj.fromLonLat(coord)
-                            )
-                        )
-                    });
-
-                    // Zoom in closer for navigation mode
-                    map.getView().setZoom(18); // More zoomed in view
-                }
-
-                // Refresh route instructions
-                displayRouteInstructions();
-            };
-
-            // Use the existing watchPositionId to track position
-            navigator.geolocation.clearWatch(watchPositionId);
-            watchPositionId = navigator.geolocation.watchPosition(
-                updateNavigation,
-                (error) => {
-                    displayError(`Navigation error: ${error.message}`);
-                    toggleNavigationMode();
-                },
-                watchOptions
-            );
+            updateDebugInfo();
+            handler;
         }
  
         function exitNavigation() {
@@ -397,6 +319,7 @@
             // Remove orientation event listeners
             window.removeEventListener("deviceorientation", handler, true);
             window.removeEventListener("deviceorientationabsolute", handler, true);
+            window.removeEventListener("devicemotion", handler, true);
 
             // Restore all map interactions
             const mapInteractions = map.getInteractions();
@@ -442,6 +365,43 @@
             const navigationBtn = document.getElementById('navigation-btn');
             navigationBtn.textContent = '🧭 Navigation';
         }
+
+        function handler(event) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    lon = position.coords.longitude;
+                    lat = position.coords.latitude;
+                    userCoords = ol.proj.fromLonLat([lon, lat]);
+                    
+                    map.getView().animate({
+                        center: userCoords,
+                        rotation: heading || 0,
+                        duration: 200
+                    });
+
+                    // Clear previous user marker
+                    userLocationSource.clear();
+
+                    // Create and add user location marker
+                    const userMarker = new ol.Feature({
+                        geometry: new ol.geom.Point(userCoords)
+                    });
+                    userLocationSource.addFeature(userMarker);
+                    
+                    updateDebugInfo(lon, lat);
+                },
+                (error) => {
+                    displayError(`Geolocation error: ${error.message}`);
+                    toggleNavigationMode();
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        }
+
 
         // Modify displayRouteInstructions to support both preview and navigation modes
         function displayRouteInstructions() {
