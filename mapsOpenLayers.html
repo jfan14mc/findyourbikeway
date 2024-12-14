@@ -95,6 +95,7 @@
         let heading = null
         let latitude = null
         let longitude = null
+        let userCoords = null
 
         const isIOS = (
             navigator.userAgent.match(/(iPod|iPhone|iPad)/) &&
@@ -407,7 +408,7 @@
                 (position) => {
                     lon = position.coords.longitude;
                     lat = position.coords.latitude;
-                    userCoords = ol.proj.fromLonLat([lon, lat]);
+                    uC = ol.proj.fromLonLat([lon, lat]);
                     (error) => {
                         displayError(`Geolocation error: ${error.message}`);
                         toggleNavigationMode()
@@ -423,7 +424,9 @@
             longitude = lon
             latitude = lat
             heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
+            userCoords = uC
             
+
             map.getView().animate({
                     center: userCoords,
                     rotation: heading,
