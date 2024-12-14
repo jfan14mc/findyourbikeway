@@ -177,7 +177,7 @@
             source: userLocationSource,
             style: new ol.style.Style({
                 image: new ol.style.Circle({
-                    radius: 8,
+                    radius: 12,
                     fill: new ol.style.Fill({color: 'blue'}),
                     stroke: new ol.style.Stroke({color: 'white', width: 3})
                 })
@@ -329,7 +329,7 @@
                 DeviceOrientationEvent.requestPermission()
                 .then((response) => {
                     if (response === "granted") {
-                    window.addEventListener("deviceorientation", handler, true);
+                    window.addEventListener("deviceorientation", rotationHandler, true);
                     } else {
                     alert("Permission needs to be granted for navigation!");
                     }
@@ -339,15 +339,15 @@
                 DeviceMotionEvent.requestPermission()
                 .then((response) => {
                     if (response === "granted") {
-                    window.addEventListener("deviceorientation", handler, true);
+                    window.addEventListener("deviceorientation", motionHandler, true);
                     } else {
                     alert("Permission needs to be granted for navigation!");
                     }
                 })
                 .catch(() => alert("not supported"));
             } else {
-                window.addEventListener("deviceorientationabsolute", handler, true);
-                window.addEventListener("devicemotion", handler, true);
+                window.addEventListener("deviceorientationabsolute", rotationHandler, true);
+                window.addEventListener("devicemotion", motionHandler, true);
             }
             
 
@@ -415,7 +415,19 @@
             navigationBtn.textContent = '🧭 Navigation';
         }
 
-        function handler(event) {
+        function handlerRotation(event) {
+            heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
+            radHeading = -1 * heading * (Math.PI / 180);
+            userCoords = uC;
+            
+            map.getView().animate({
+                rotation: radHeading,
+                duration: 150,
+            });
+            updateDebugInfo();
+        }
+
+        function handlerMotion(event) {
             getPositionId = navigator.geolocation.getCurrentPosition(
                 (position) => {
                     lon = position.coords.longitude;
@@ -435,13 +447,10 @@
 
             longitude = lon
             latitude = lat
-            heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
-            radHeading = -1 * heading * (Math.PI / 180);
             userCoords = uC;
             
             map.getView().animate({
                 center: userCoords,
-                rotation: radHeading,
                 duration: 150,
             });
 
@@ -455,47 +464,6 @@
             userLocationSource.addFeature(userMarker);
             updateDebugInfo();
         }
-
-        // function navigationView() {
-        //     getPositionId = navigator.geolocation.getCurrentPosition(
-        //         (position) => {
-        //             lon = position.coords.longitude;
-        //             lat = position.coords.latitude;
-        //             uC = ol.proj.fromLonLat([lon, lat]);
-        //             (error) => {
-        //                 displayError(`Geolocation error: ${error.message}`);
-        //                 toggleNavigationMode()
-        //             },
-        //             {
-        //                 enableHighAccuracy: true,
-        //                 timeout: 5000,
-        //                 maximumAge: 0
-        //             }
-        //         }
-        //     )
-            
-        //     longitude = lon
-        //     latitude = lat
-        //     heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
-        //     userCoords = uC
-            
-
-        //     map.getView().animate({
-        //             center: userCoords,
-        //             rotation: heading * pi / 180,
-        //             duration: 200
-        //         });
-
-        //                     // Clear previous user marker
-        //                     userLocationSource.clear();
-
-        //     // Create and add user location marker
-        //     const userMarker = new ol.Feature({
-        //         geometry: new ol.geom.Point(userCoords)
-        //     });
-        //     userLocationSource.addFeature(userMarker);
-        //     updateDebugInfo();
-        // }
 
         // Modify displayRouteInstructions to support both preview and navigation modes
         function displayRouteInstructions() {
