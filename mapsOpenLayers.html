@@ -86,7 +86,7 @@
         let headingLockEnabled = true;
         let userPositionData = null;
 
-        const isIOS = !(
+        const isIOS = (
             navigator.userAgent.match(/(iPod|iPhone|iPad)/) &&
             navigator.userAgent.match(/AppleWebKit/)
         );
@@ -302,6 +302,8 @@
         }
 
         function startNavigation() {
+            const navigationBtn = document.getElementById('navigation-btn');
+
             // Create center zoom interactions
             const centerZoom = new ol.interaction.MouseWheelZoom({ useAnchor: false });
             const centerPinchZoom = new ol.interaction.PinchZoom({ useAnchor: false });
