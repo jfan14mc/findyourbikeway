@@ -188,32 +188,48 @@
 
         // Avoidance area creation variables
         let avoidanceCenter = null;
+        let avoidanceCenterTimeout = null;
         let avoidanceDrawing = false;
 
-        // Map click handler for avoidance areas
         map.on('click', (event) => {
-            // Check for feature at click location
+            // Reintroduce control-click check for desktop
+            const isCtrlClick = event.originalEvent.ctrlKey;
+            const isMobileTouch = event.type === 'touchstart'; // Add mobile touch detection
+
+            // Only proceed if it's a ctrl-click or mobile touch
+            if (!isCtrlClick && !isMobileTouch) return;
+
+            // Rest of the existing avoidance area creation logic
             const feature = map.forEachFeatureAtPixel(event.pixel, 
                 (feature, layer) => feature,
                 { layerFilter: () => true }
             );
 
-            // Remove feature if clicked and it's an avoidance area
+            // Remove feature logic remains the same
             if (feature && feature.getGeometry() instanceof ol.geom.Circle) {
                 avoidanceSource.removeFeature(feature);
                 return;
             }
+            
 
-            // Create avoidance area on ctrl-click
-            if (event.originalEvent.ctrlKey) {
-                const coordinate = event.coordinate;
-                
-                if (!avoidanceCenter) {
-                    // First ctrl-click: set center
-                    avoidanceCenter = coordinate;
+            // Mobile avoidance area creation logic
+            const coordinate = event.coordinate;
+            
+            // Clear any existing timeout
+            if (avoidanceCenterTimeout) {
+                clearTimeout(avoidanceCenterTimeout);
+                avoidanceCenterTimeout = null;
+            }
+
+            if (!avoidanceCenter) {
+                // First tap: set potential center and start a timeout
+                avoidanceCenter = coordinate;
+                avoidanceCenterTimeout = setTimeout(() => {
                     avoidanceDrawing = true;
-                } else {
-                    // Second ctrl-click: complete circle with projection-based radius
+                }, 500); // 500ms hold to confirm center
+            } else {
+                // Second tap: complete avoidance area if drawing is active
+                if (avoidanceDrawing) {
                     const resolution = map.getView().getResolution();
                     const radius = Math.sqrt(
                         Math.pow(coordinate[0] - avoidanceCenter[0], 2) +
@@ -229,7 +245,30 @@
                     // Reset drawing state
                     avoidanceCenter = null;
                     avoidanceDrawing = false;
+                    avoidanceCenterTimeout = null;
+                } else {
+                    // If not drawing, reset center
+                    avoidanceCenter = coordinate;
+                    avoidanceCenterTimeout = setTimeout(() => {
+                        avoidanceDrawing = true;
+                    }, 500);
                 }
+            }
+        });
+
+        // Add touch event handlers for mobile compatibility
+        map.getViewport().addEventListener('touchstart', (event) => {
+            // Prevent default touch behavior to avoid scrolling/zooming
+            event.preventDefault();
+        });
+
+        map.getViewport().addEventListener('touchend', (event) => {
+            // Simulate click for touch devices
+            if (event.touches.length === 0) {
+                const pixel = map.getEventPixel(event.changedTouches[0]);
+                map.forEachFeatureAtPixel(pixel, (feature) => {
+                    // Optional: Add touch-specific feature interaction if needed
+                });
             }
         });
 
@@ -261,7 +300,6 @@
             updateDebugInfo();
         }
         
-
         function startNavigation() {
             const navigationBtn = document.getElementById('navigation-btn');
 
@@ -300,13 +338,11 @@
             }
             window.addEventListener("devicemotion", handler, true);
 
+            updateDebugInfo();
             map.getView().animate({
                     zoom: 16,
-                    duration: 200
+                    duration: 300
                 });
-
-            updateDebugInfo();
-            handler;
         }
  
         function exitNavigation() {
@@ -367,41 +403,43 @@
         }
 
         function handler(event) {
-            navigator.geolocation.getCurrentPosition(
+            watchPositionId = navigator.geolocation.getCurrentPosition(
                 (position) => {
                     lon = position.coords.longitude;
                     lat = position.coords.latitude;
                     userCoords = ol.proj.fromLonLat([lon, lat]);
-                    
-                    map.getView().animate({
-                        center: userCoords,
-                        rotation: heading || 0,
-                        duration: 200
-                    });
-
-                    // Clear previous user marker
-                    userLocationSource.clear();
-
-                    // Create and add user location marker
-                    const userMarker = new ol.Feature({
-                        geometry: new ol.geom.Point(userCoords)
-                    });
-                    userLocationSource.addFeature(userMarker);
-                    
-                    updateDebugInfo(lon, lat);
-                },
-                (error) => {
-                    displayError(`Geolocation error: ${error.message}`);
-                    toggleNavigationMode();
-                },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
+                    (error) => {
+                        displayError(`Geolocation error: ${error.message}`);
+                        toggleNavigationMode()
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 5000,
+                        maximumAge: 0
+                    }
                 }
-            );
-        }
+            )
+            
+            longitude = lon
+            latitude = lat
+            heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
+            
+            map.getView().animate({
+                    center: userCoords,
+                    rotation: heading,
+                    duration: 200
+                });
 
+                // Clear previous user marker
+                userLocationSource.clear();
+
+                // Create and add user location marker
+                const userMarker = new ol.Feature({
+                    geometry: new ol.geom.Point(userCoords)
+                });
+                userLocationSource.addFeature(userMarker);
+            updateDebugInfo();
+        }
 
         // Modify displayRouteInstructions to support both preview and navigation modes
         function displayRouteInstructions() {
@@ -566,6 +604,7 @@
                 φ2 * 180 / Math.PI
             ];
         }
+        
         document.addEventListener('DOMContentLoaded', updateDebugInfo);
     </script>
 </body>
