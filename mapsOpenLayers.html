@@ -120,7 +120,7 @@
             z-index: 1000;
             max-width: 300px;
             word-wrap: break-word;
-            font-size: 12px;
+            font-size: 10px;
         }
 
         /* Disable callout and highlight on mobile */
@@ -195,9 +195,9 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V19:</strong><br>
+                    <strong>Debug Information V21:</strong><br>
                     isIOS: ${isIOS}<br>
-                    Current Location: ${latitude ? latitude.toFixed(7) : 'N/A'}, ${longitude ? longitude.toFixed(7) : 'N/A'}<br>
+                    Current Location: ${latitude ? latitude.toFixed(6) : 'N/A'}, ${longitude ? longitude.toFixed(6) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
                     Navigation Mode: ${navigationMode}<br>
                 `;
@@ -520,7 +520,8 @@
                 window.addEventListener("deviceorientationabsolute", rotationHandler, true);
                 window.addEventListener("devicemotion", motionHandler, true);
             }
-            
+
+            updateUserLocation()
 
             updateDebugInfo();
             map.getView().animate({
@@ -604,40 +605,39 @@
         let userLocationFeature = null;
 
         function motionHandler(event) {
+            updateUserLocation()
+        }
+
+        function updateUserLocation() {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
                     const lon = position.coords.longitude;
                     const lat = position.coords.latitude;
                     const uC = ol.proj.fromLonLat([lon, lat]);
                     
-                    // Only update if coordinates have meaningfully changed
-                    if (!userLocationFeature) {
-                        userLocationFeature = new ol.Feature({
-                            geometry: new ol.geom.Point(uC)
-                        });
-                        userLocationSource.addFeature(userLocationFeature);
-                    } else {
-                        userLocationFeature.setGeometry(new ol.geom.Point(uC));
-                    }
-                    
+                    // Create the initial user location feature
+                    userLocationFeature = new ol.Feature({
+                        geometry: new ol.geom.Point(uC)
+                    });
+                    userLocationSource.addFeature(userLocationFeature);
+
+                    map.getView().animate({
+                        center: uC,
+                        duration: 100,
+                    });
+
                     longitude = lon;
                     latitude = lat;
                     userCoords = uC;
-                
-                    map.getView().animate({
-                        center: userCoords,
-                        duration: 100,
-                    });
-                    
+
                     updateDebugInfo();
                 },
                 (error) => {
                     displayError(`Geolocation error: ${error.message}`);
-                    toggleNavigationMode();
                 },
                 {
                     enableHighAccuracy: true,
-                    timeout: 1000,  // Reduced timeout
+                    timeout: 5000, // Allow a longer timeout for initialization
                     maximumAge: 0
                 }
             );
