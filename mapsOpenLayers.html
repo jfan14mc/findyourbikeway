@@ -195,7 +195,7 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V21:</strong><br>
+                    <strong>Debug Information V22:</strong><br>
                     isIOS: ${isIOS}<br>
                     Current Location: ${latitude ? latitude.toFixed(6) : 'N/A'}, ${longitude ? longitude.toFixed(6) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
@@ -520,7 +520,8 @@
                 window.addEventListener("deviceorientationabsolute", rotationHandler, true);
                 window.addEventListener("devicemotion", motionHandler, true);
             }
-
+            
+            //for initializing the user's position
             updateUserLocation()
 
             updateDebugInfo();
@@ -615,11 +616,14 @@
                     const lat = position.coords.latitude;
                     const uC = ol.proj.fromLonLat([lon, lat]);
                     
-                    // Create the initial user location feature
-                    userLocationFeature = new ol.Feature({
-                        geometry: new ol.geom.Point(uC)
-                    });
-                    userLocationSource.addFeature(userLocationFeature);
+                    if (!userLocationFeature) {
+                        userLocationFeature = new ol.Feature({
+                            geometry: new ol.geom.Point(uC)
+                        });
+                        userLocationSource.addFeature(userLocationFeature);
+                    } else {
+                        userLocationFeature.setGeometry(new ol.geom.Point(uC));
+                    }
 
                     map.getView().animate({
                         center: uC,
