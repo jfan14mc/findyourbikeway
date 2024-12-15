@@ -195,7 +195,7 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V26:</strong><br>
+                    <strong>Debug Information V27:</strong><br>
                     isIOS: ${isIOS}<br>
                     Current Location: ${latitude ? latitude.toFixed(6) : 'N/A'}, ${longitude ? longitude.toFixed(6) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
@@ -568,8 +568,8 @@
                 duration: 500
             })
 
-            // Clear user location marker
             userLocationSource.clear();
+            userLocationFeature = null;
 
             // Clear route instructions
             document.getElementById('route-instructions').innerHTML = '';
