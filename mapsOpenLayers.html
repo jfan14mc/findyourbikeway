@@ -194,7 +194,7 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V28:</strong><br>
+                    <strong>Debug Information V30:</strong><br>
                     isIOS: ${isIOS}<br>
                     Current Location: ${latitude ? latitude.toFixed(6) : 'N/A'}, ${longitude ? longitude.toFixed(6) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
@@ -527,15 +527,8 @@
                         map.getView().animate({ center: uC, duration: 100 });
 
                         // Update or create user location feature
-                        if (!userLocationFeature) {
-                            userLocationFeature = new ol.Feature({
-                                geometry: new ol.geom.Point(uC),
-                            });
-                            userLocationSource.addFeature(userLocationFeature);
-                        } else {
-                            userLocationFeature.setGeometry(new ol.geom.Point(uC));
-                            userLocationSource.changed();
-                        }
+                        userLocationFeature.setGeometry(new ol.geom.Point(uC));
+                        userLocationSource.changed();
                         routeSource.changed();
                     },
                     (error) => {
@@ -546,7 +539,7 @@
                     {
                         enableHighAccuracy: true,
                         maximumAge: 0,
-                        timeout: 1000,
+                        timeout: 5000,
                     }
                 );
             }
@@ -643,7 +636,7 @@
                         geometry: new ol.geom.Point(uC)
                     });
                     userLocationSource.addFeature(userLocationFeature);
-                    
+                    userLocationSource.changed();
 
                     map.getView().animate({
                         center: uC,
