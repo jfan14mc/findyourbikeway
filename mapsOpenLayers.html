@@ -157,7 +157,8 @@
 
         // Global variables for tracking
         let currentRoute = null;
-        let getPositionId = null;
+        // let getPositionId = null;
+        let watchId = null;
         let navigationMode = false;
         let heading = null
         let radHeading = null
@@ -195,7 +196,7 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V27:</strong><br>
+                    <strong>Debug Information V28:</strong><br>
                     isIOS: ${isIOS}<br>
                     Current Location: ${latitude ? latitude.toFixed(6) : 'N/A'}, ${longitude ? longitude.toFixed(6) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
@@ -511,22 +512,57 @@
                 })
                 .catch(() => alert("not supported"));
 
-                DeviceMotionEvent.requestPermission()
-                .then((response) => {
-                    if (response === "granted") {
-                    window.addEventListener("devicemotion", motionHandler, true);
-                    } else {
-                    alert("Permission needs to be granted for navigation!");
-                    }
-                })
-                .catch(() => alert("not supported"));
+                // DeviceMotionEvent.requestPermission()
+                // .then((response) => {
+                //     if (response === "granted") {
+                //     window.addEventListener("devicemotion", motionHandler, true);
+                //     } else {
+                //     alert("Permission needs to be granted for navigation!");
+                //     }
+                // })
+                // .catch(() => alert("not supported"));
             } else {
                 window.addEventListener("deviceorientationabsolute", rotationHandler, true);
-                window.addEventListener("devicemotion", motionHandler, true);
+                // window.addEventListener("devicemotion", motionHandler, true);
             }
-            
-            //for initializing the user's position
-            updateUserLocation()
+
+            if (!userLocationFeature) {
+                updateUserLocation(); // Fetch and display initial location
+            }
+
+            // Start continuous location tracking
+            if (watchId === null) {
+                watchId = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const lon = position.coords.longitude;
+                        const lat = position.coords.latitude;
+                        const uC = ol.proj.fromLonLat([lon, lat]);
+
+                        // Update or create user location feature
+                        if (!userLocationFeature) {
+                            userLocationFeature = new ol.Feature({
+                                geometry: new ol.geom.Point(uC),
+                            });
+                            userLocationSource.addFeature(userLocationFeature);
+                        } else {
+                            userLocationFeature.setGeometry(new ol.geom.Point(uC));
+                        }
+
+                        // Center map on user location
+                        map.getView().animate({ center: uC, duration: 100 });
+                    },
+                    (error) => {
+                        console.error('Geolocation error:', error);
+                        displayError(`Error: ${error.message}`);
+                        toggleNavigationMode(); // Exit navigation on error
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        maximumAge: 0,
+                        timeout: 1000,
+                    }
+                );
+            }
 
             updateDebugInfo();
             map.getView().animate({
@@ -536,16 +572,16 @@
         }
  
         function exitNavigation() {
-            // Clear active watchers and position tracking
-            if (getPositionId) {
-                navigator.geolocation.clearWatch(getPositionId);
-                getPositionId = null;
+            // Stop tracking user location
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
             }
 
             // Remove orientation event listeners
             window.removeEventListener("deviceorientation", rotationHandler, true);
             window.removeEventListener("deviceorientationabsolute", rotationHandler, true);
-            window.removeEventListener("devicemotion", motionHandler, true);
+            // window.removeEventListener("devicemotion", motionHandler, true);
 
             // Restore all map interactions
             const mapInteractions = map.getInteractions();
