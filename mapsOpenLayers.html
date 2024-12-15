@@ -157,7 +157,6 @@
 
         // Global variables for tracking
         let currentRoute = null;
-        // let getPositionId = null;
         let watchId = null;
         let navigationMode = false;
         let heading = null
@@ -262,10 +261,6 @@
         map.addLayer(routeLayer);
         map.addLayer(avoidanceLayer);
         map.addLayer(userLocationLayer);
-        
-        routeLayer.setZIndex(5);
-        avoidanceLayer.setZIndex(10);
-        userLocationLayer.setZIndex(15);
 
         // Desktop Event Handler
         let desktopAvoidanceCenter = null;
@@ -451,13 +446,11 @@
 
                 // Slide routing container back down
                 routingContainer.classList.remove('hidden');
-
                 
                 // Restore map height to default
                 mapElement.style.height = 'calc(100vh - 300px)';
                 mapElement.classList.remove('navigation-active')
 
-                
                 exitNavigation();
             } else {
                 navigationBtn.textContent = '🧭 Exit Navigation';
@@ -511,23 +504,12 @@
                     }
                 })
                 .catch(() => alert("not supported"));
-
-                // DeviceMotionEvent.requestPermission()
-                // .then((response) => {
-                //     if (response === "granted") {
-                //     window.addEventListener("devicemotion", motionHandler, true);
-                //     } else {
-                //     alert("Permission needs to be granted for navigation!");
-                //     }
-                // })
-                // .catch(() => alert("not supported"));
             } else {
                 window.addEventListener("deviceorientationabsolute", rotationHandler, true);
-                // window.addEventListener("devicemotion", motionHandler, true);
             }
 
             if (!userLocationFeature) {
-                updateUserLocation(); // Fetch and display initial location
+                initializeUserLocation(); // Fetch and display initial location
             }
 
             // Start continuous location tracking
@@ -645,25 +627,19 @@
 
         let userLocationFeature = null;
 
-        function motionHandler(event) {
-            updateUserLocation()
-        }
-
-        function updateUserLocation() {
+        function initializeUserLocation() {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
                     const lon = position.coords.longitude;
                     const lat = position.coords.latitude;
                     const uC = ol.proj.fromLonLat([lon, lat]);
                     
-                    if (!userLocationFeature) {
-                        userLocationFeature = new ol.Feature({
-                            geometry: new ol.geom.Point(uC)
-                        });
-                        userLocationSource.addFeature(userLocationFeature);
-                    } else {
-                        userLocationFeature.setGeometry(new ol.geom.Point(uC));
-                    }
+                    
+                    userLocationFeature = new ol.Feature({
+                        geometry: new ol.geom.Point(uC)
+                    });
+                    userLocationSource.addFeature(userLocationFeature);
+                    
 
                     map.getView().animate({
                         center: uC,
