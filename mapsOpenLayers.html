@@ -262,9 +262,9 @@
         map.addLayer(avoidanceLayer);
         map.addLayer(userLocationLayer);
         
-        // routeLayer.setZindex(0);
-        // avoidanceLayer.setZindex(1);
-        // userLocationLayer.setZindex(2);
+        routeLayer.setZIndex(5);
+        avoidanceLayer.setZIndex(10);
+        userLocationLayer.setZIndex(15);
 
         // Desktop Event Handler
         let desktopAvoidanceCenter = null;
