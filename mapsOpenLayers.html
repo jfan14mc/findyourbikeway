@@ -163,7 +163,6 @@
         let radHeading = null
         let latitude = null
         let longitude = null
-        let userCoords = null
 
         const isIOS = (
             navigator.userAgent.match(/(iPod|iPhone|iPad)/) &&
@@ -520,6 +519,13 @@
                         const lat = position.coords.latitude;
                         const uC = ol.proj.fromLonLat([lon, lat]);
 
+                        longitude = lon;
+                        latitude = lat;
+                        updateDebugInfo();
+
+                        // Center map on user location
+                        map.getView().animate({ center: uC, duration: 100 });
+
                         // Update or create user location feature
                         if (!userLocationFeature) {
                             userLocationFeature = new ol.Feature({
@@ -528,10 +534,9 @@
                             userLocationSource.addFeature(userLocationFeature);
                         } else {
                             userLocationFeature.setGeometry(new ol.geom.Point(uC));
+                            userLocationSource.changed();
                         }
-
-                        // Center map on user location
-                        map.getView().animate({ center: uC, duration: 100 });
+                        routeSource.changed();
                     },
                     (error) => {
                         console.error('Geolocation error:', error);
@@ -546,7 +551,6 @@
                 );
             }
 
-            updateDebugInfo();
             map.getView().animate({
                     zoom: 16,
                     duration: 300
@@ -648,8 +652,6 @@
 
                     longitude = lon;
                     latitude = lat;
-                    userCoords = uC;
-
                     updateDebugInfo();
                 },
                 (error) => {
