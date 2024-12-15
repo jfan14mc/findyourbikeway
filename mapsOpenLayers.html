@@ -226,7 +226,7 @@
             style: new ol.style.Style({
                 stroke: new ol.style.Stroke({
                     color: 'blue',
-                    width: 5
+                    width: 7
                 })
             })
         });
@@ -251,7 +251,7 @@
             source: userLocationSource,
             style: new ol.style.Style({
                 image: new ol.style.Circle({
-                    radius: 12,
+                    radius: 10,
                     fill: new ol.style.Fill({color: 'blue'}),
                     stroke: new ol.style.Stroke({color: 'white', width: 3})
                 })
@@ -308,12 +308,36 @@
             }
         });
 
-        // Mobile Event Handlers
         let mobileAvoidanceCenter = null;
         let mobileAvoidanceTimeout = null;
+        let mapInteractionsDisabled = false;
+
+        // Disable map interactions
+        function disableMapInteractions(map) {
+            map.getInteractions().forEach((interaction) => {
+                if (interaction instanceof ol.interaction.DragPan ||
+                    interaction instanceof ol.interaction.PinchZoom ||
+                    interaction instanceof ol.interaction.PinchRotate) {
+                    interaction.setActive(false);
+                }
+            });
+            mapInteractionsDisabled = true;
+        }
+
+        // Re-enable map interactions
+        function enableMapInteractions(map) {
+            map.getInteractions().forEach((interaction) => {
+                if (interaction instanceof ol.interaction.DragPan ||
+                    interaction instanceof ol.interaction.PinchZoom ||
+                    interaction instanceof ol.interaction.PinchRotate) {
+                    interaction.setActive(true);
+                }
+            });
+            mapInteractionsDisabled = false;
+        }
 
         map.getViewport().addEventListener('touchstart', (event) => {
-            // Handle first touch to set center
+            // Handle first touch to potentially set center
             if (event.touches.length === 1) {
                 const touch = event.touches[0];
                 const pixel = map.getEventPixel(touch);
@@ -342,7 +366,16 @@
                 // Set timeout for long press
                 mobileAvoidanceTimeout = setTimeout(() => {
                     mobileAvoidanceCenter = coordinate;
-                }, 500);
+                    disableMapInteractions(map);
+                }, 750);
+            }
+        });
+
+        map.getViewport().addEventListener('touchmove', (event) => {
+            // If timeout is active, cancel it
+            if (mobileAvoidanceTimeout) {
+                clearTimeout(mobileAvoidanceTimeout);
+                mobileAvoidanceTimeout = null;
             }
         });
 
@@ -350,31 +383,39 @@
             // Clear the timeout
             if (mobileAvoidanceTimeout) {
                 clearTimeout(mobileAvoidanceTimeout);
+                mobileAvoidanceTimeout = null;
             }
             
-            // Complete circle when second touch occurs
-            if (mobileAvoidanceCenter && event.touches.length === 0) {
-                const touch = event.changedTouches[0];
-                const pixel = map.getEventPixel(touch);
-                const coordinate = map.getCoordinateFromPixel(pixel);
-                
-                // Calculate radius
-                const radius = Math.sqrt(
-                    Math.pow(coordinate[0] - mobileAvoidanceCenter[0], 2) +
-                    Math.pow(coordinate[1] - mobileAvoidanceCenter[1], 2)
-                );
-                
-                // Create circle feature
-                const circle = new ol.Feature(
-                    new ol.geom.Circle(mobileAvoidanceCenter, radius)
-                );
-                avoidanceSource.addFeature(circle);
-                
-                // Prevent default only for our specific interaction
-                event.preventDefault();
-                
-                // Reset mobile avoidance center
-                mobileAvoidanceCenter = null;
+            // If center is set and interactions are disabled
+            if (mobileAvoidanceCenter && mapInteractionsDisabled) {
+                if (event.touches.length === 0) {
+                    // Original touch released without setting radius
+                    enableMapInteractions(map);
+                    mobileAvoidanceCenter = null;
+                } else if (event.touches.length === 1) {
+                    // Second touch sets the radius
+                    const touch = event.touches[0];
+                    const pixel = map.getEventPixel(touch);
+                    const coordinate = map.getCoordinateFromPixel(pixel);
+                    
+                    // Calculate radius
+                    const radius = Math.sqrt(
+                        Math.pow(coordinate[0] - mobileAvoidanceCenter[0], 2) +
+                        Math.pow(coordinate[1] - mobileAvoidanceCenter[1], 2)
+                    );
+                    
+                    // Create circle feature
+                    const circle = new ol.Feature(
+                        new ol.geom.Circle(mobileAvoidanceCenter, radius)
+                    );
+                    avoidanceSource.addFeature(circle);
+                    
+                    // Re-enable map interactions
+                    enableMapInteractions(map);
+                    
+                    // Reset mobile avoidance center
+                    mobileAvoidanceCenter = null;
+                }
             }
         });
 
