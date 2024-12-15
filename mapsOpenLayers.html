@@ -195,7 +195,7 @@
             
             if (debugInfoElement) {
                 debugInfoElement.innerHTML = `
-                    <strong>Debug Information V18:</strong><br>
+                    <strong>Debug Information V19:</strong><br>
                     isIOS: ${isIOS}<br>
                     Current Location: ${latitude ? latitude.toFixed(7) : 'N/A'}, ${longitude ? longitude.toFixed(7) : 'N/A'}<br>
                     Current Heading: ${heading || 'N/A'}<br>
@@ -262,89 +262,119 @@
         map.addLayer(avoidanceLayer);
         map.addLayer(userLocationLayer);
 
-        // Avoidance area creation variables
-        let avoidanceCenter = null;
-        let avoidanceCenterTimeout = null;
-        let avoidanceDrawing = false;
+        // Desktop Event Handler
+        let desktopAvoidanceCenter = null;
 
-        map.on('click', (event) => {
-            // Reintroduce control-click check for desktop
-            const isCtrlClick = event.originalEvent.ctrlKey;
-            const isMobileTouch = event.type === 'touchstart'; // Add mobile touch detection
+        map.getViewport().addEventListener('click', (event) => {
+            // Ensure it's a ctrl-click
+            if (!event.ctrlKey) return;
 
-            // Only proceed if it's a ctrl-click or mobile touch
-            if (!isCtrlClick && !isMobileTouch) return;
-
-            // Rest of the existing avoidance area creation logic
-            const feature = map.forEachFeatureAtPixel(event.pixel, 
+            const pixel = map.getEventPixel(event);
+            
+            // First, check if an existing feature is being clicked
+            const feature = map.forEachFeatureAtPixel(
+                pixel,
                 (feature, layer) => feature,
                 { layerFilter: () => true }
             );
-
-            // Remove feature logic remains the same
+            
+            // Remove feature if it's a circle
             if (feature && feature.getGeometry() instanceof ol.geom.Circle) {
                 avoidanceSource.removeFeature(feature);
                 return;
             }
             
-
-            // Mobile avoidance area creation logic
-            const coordinate = event.coordinate;
+            // Create new avoidance area
+            const coordinate = map.getCoordinateFromPixel(pixel);
             
-            // Clear any existing timeout
-            if (avoidanceCenterTimeout) {
-                clearTimeout(avoidanceCenterTimeout);
-                avoidanceCenterTimeout = null;
-            }
-
-            if (!avoidanceCenter) {
-                // First tap: set potential center and start a timeout
-                avoidanceCenter = coordinate;
-                avoidanceCenterTimeout = setTimeout(() => {
-                    avoidanceDrawing = true;
-                }, 500); // 500ms hold to confirm center
-            } else {
-                // Second tap: complete avoidance area if drawing is active
-                if (avoidanceDrawing) {
-                    const resolution = map.getView().getResolution();
-                    const radius = Math.sqrt(
-                        Math.pow(coordinate[0] - avoidanceCenter[0], 2) +
-                        Math.pow(coordinate[1] - avoidanceCenter[1], 2)
-                    );
-
-                    // Create circle feature
-                    const circle = new ol.Feature(
-                        new ol.geom.Circle(avoidanceCenter, radius)
-                    );
-                    avoidanceSource.addFeature(circle);
-
-                    // Reset drawing state
-                    avoidanceCenter = null;
-                    avoidanceDrawing = false;
-                    avoidanceCenterTimeout = null;
-                } else {
-                    // If not drawing, reset center
-                    avoidanceCenter = coordinate;
-                    avoidanceCenterTimeout = setTimeout(() => {
-                        avoidanceDrawing = true;
-                    }, 500);
-                }
+            // If no previous center, set the first point
+            if (!desktopAvoidanceCenter) {
+                desktopAvoidanceCenter = coordinate;
+            } 
+            // If we already have a center, create the circle
+            else {
+                const radius = Math.sqrt(
+                    Math.pow(coordinate[0] - desktopAvoidanceCenter[0], 2) +
+                    Math.pow(coordinate[1] - desktopAvoidanceCenter[1], 2)
+                );
+                
+                const circle = new ol.Feature(
+                    new ol.geom.Circle(desktopAvoidanceCenter, radius)
+                );
+                avoidanceSource.addFeature(circle);
+                
+                // Reset desktop avoidance center
+                desktopAvoidanceCenter = null;
             }
         });
 
-        // Add touch event handlers for mobile compatibility
+        // Mobile Event Handlers
+        let mobileAvoidanceCenter = null;
+        let mobileAvoidanceTimeout = null;
+
         map.getViewport().addEventListener('touchstart', (event) => {
-            // Prevent default touch behavior to avoid scrolling/zooming
-            event.preventDefault();
+            // Handle first touch to set center
+            if (event.touches.length === 1) {
+                const touch = event.touches[0];
+                const pixel = map.getEventPixel(touch);
+                const coordinate = map.getCoordinateFromPixel(pixel);
+                
+                // Check for feature removal first
+                const feature = map.forEachFeatureAtPixel(
+                    pixel,
+                    (feature, layer) => feature,
+                    { layerFilter: () => true }
+                );
+                
+                // Remove feature if it's a circle
+                if (feature && feature.getGeometry() instanceof ol.geom.Circle) {
+                    event.preventDefault();
+                    avoidanceSource.removeFeature(feature);
+                    mobileAvoidanceCenter = null;
+                    return;
+                }
+                
+                // Clear any existing timeout
+                if (mobileAvoidanceTimeout) {
+                    clearTimeout(mobileAvoidanceTimeout);
+                }
+                
+                // Set timeout for long press
+                mobileAvoidanceTimeout = setTimeout(() => {
+                    mobileAvoidanceCenter = coordinate;
+                }, 500);
+            }
         });
 
         map.getViewport().addEventListener('touchend', (event) => {
-            // Simulate click for touch devices
-            if (event.touches.length === 0) {
-                const pixel = map.getEventPixel(event.changedTouches[0]);
-                map.forEachFeatureAtPixel(pixel, (feature) => {
-                    // Optional: Add touch-specific feature interaction if needed
-                });
+            // Clear the timeout
+            if (mobileAvoidanceTimeout) {
+                clearTimeout(mobileAvoidanceTimeout);
+            }
+            
+            // Complete circle when second touch occurs
+            if (mobileAvoidanceCenter && event.touches.length === 0) {
+                const touch = event.changedTouches[0];
+                const pixel = map.getEventPixel(touch);
+                const coordinate = map.getCoordinateFromPixel(pixel);
+                
+                // Calculate radius
+                const radius = Math.sqrt(
+                    Math.pow(coordinate[0] - mobileAvoidanceCenter[0], 2) +
+                    Math.pow(coordinate[1] - mobileAvoidanceCenter[1], 2)
+                );
+                
+                // Create circle feature
+                const circle = new ol.Feature(
+                    new ol.geom.Circle(mobileAvoidanceCenter, radius)
+                );
+                avoidanceSource.addFeature(circle);
+                
+                // Prevent default only for our specific interaction
+                event.preventDefault();
+                
+                // Reset mobile avoidance center
+                mobileAvoidanceCenter = null;
             }
         });
 
