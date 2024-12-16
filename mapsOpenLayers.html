@@ -227,7 +227,9 @@
                     color: 'blue',
                     width: 7
                 })
-            })
+            }),
+            updateWhileAnimating: true,
+            updateWhileInteracting: true
         });
 
         const avoidanceSource = new ol.source.Vector();
@@ -241,7 +243,9 @@
                     color: 'red',
                     width: 2
                 })
-            })
+            }),
+            updateWhileAnimating: true,
+            updateWhileInteracting: true
         });
 
         // Create user location layer
@@ -254,7 +258,9 @@
                     fill: new ol.style.Fill({color: 'green'}),
                     stroke: new ol.style.Stroke({color: 'white', width: 3})
                 })
-            })
+            }),
+            updateWhileAnimating: true,
+            updateWhileInteracting: true
         });
         
         map.addLayer(routeLayer);
@@ -528,8 +534,6 @@
 
                         // Update or create user location feature
                         userLocationFeature.setGeometry(new ol.geom.Point(uC));
-                        userLocationSource.changed();
-                        routeSource.changed();
                     },
                     (error) => {
                         console.error('Geolocation error:', error);
